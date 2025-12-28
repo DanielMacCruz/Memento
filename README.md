@@ -39,9 +39,9 @@ git clone https://github.com/yourusername/memento.git
 ```bash
 cd memento
 sudo python3 run.py
+Then open http://localhost:5000 in your browser.
 ```
 
-Then open http://localhost:5000 in your browser.
 
 ### Interface Overview
 
