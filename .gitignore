@@ -1,0 +1,105 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# ==== APPLICATION DATA ====
+# State persistence (generated at runtime)
+data/
+
+# ==== CAPTURES & HASHES ====
+# These contain personal network data - never commit
+captures/
+hashes/
+cracked/
+scans/
+
+# Scan output files (generated during operation)
+scan_*.csv
+scan_*.log
+vigilance_*.cap
+vigilance_*.csv
+all_captures.hc22000
+*.cap
+*.pcap
+*.hc22000
+*.cracked
+*.netxml
+*.kismet.*
+
+# ==== WORDLISTS ====
+# Too large and potentially sensitive
+wordlists/
+!wordlists/.gitkeep
+!wordlists/8digit_mask.txt
+
+# ==== BRAZILIAN PASSWORD MINING ====
+# Personal research data - never commit
+BR_*.txt
+BR_*.json
+BR_CLASSIFICATION.json
+brazilian_*.txt
+*_candidates.txt
+batch_sample.txt
+sample_batch_*.txt
+*_entries_full.txt
+
+# Model files (too large, training data)
+*.json
+!package.json
+baseline_*.json
+*_model.json
+*_ngram*.json
+
+# ==== EXTERNAL TOOLS ====
+externals/
+brgen/
+
+# ==== ANALYSIS & RESEARCH ====
+yapyap/
+BATCH ANALYSIS/
+folder_analysis.md
+
+# ==== DIRECTIVES & PLANS ====
+*DIRECTIVES*.md
+*PLAN*.md
+PLAN_*.md
+
+# ==== MISC SCRIPTS (BR analysis) ====
+br_*.py
+!br_extractor.py
+
+# Old/backup files
+*.old
