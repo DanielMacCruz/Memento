@@ -32,13 +32,12 @@ pip3 install flask scapy
 
 ```bash
 git clone https://github.com/yourusername/memento.git
-cd memento
-pip3 install -r requirements.txt  # If requirements.txt exists
 ```
 
 ## Usage
 
 ```bash
+cd memento
 sudo python3 run.py
 ```
 
