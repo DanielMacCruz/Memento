@@ -37,7 +37,12 @@ Thumbs.db
 
 # ==== APPLICATION DATA ====
 # State persistence (generated at runtime)
-data/
+data/state.json
+data/temp/
+
+# Data files (too large for git)
+data/models/*.json
+data/brazilian/*.txt
 
 # ==== CAPTURES & HASHES ====
 # These contain personal network data - never commit
@@ -47,11 +52,6 @@ cracked/
 scans/
 
 # Scan output files (generated during operation)
-scan_*.csv
-scan_*.log
-vigilance_*.cap
-vigilance_*.csv
-all_captures.hc22000
 *.cap
 *.pcap
 *.hc22000
@@ -63,43 +63,24 @@ all_captures.hc22000
 # Too large and potentially sensitive
 wordlists/
 !wordlists/.gitkeep
-!wordlists/8digit_mask.txt
 
-# ==== BRAZILIAN PASSWORD MINING ====
-# Personal research data - never commit
-BR_*.txt
-BR_*.json
-BR_CLASSIFICATION.json
-brazilian_*.txt
-*_candidates.txt
-batch_sample.txt
-sample_batch_*.txt
-*_entries_full.txt
-
-# Model files (too large, training data)
-*.json
-!package.json
-baseline_*.json
-*_model.json
-*_ngram*.json
-
-# ==== EXTERNAL TOOLS ====
+# ==== SUBPROJECTS ====
+# These have their own repos/venvs
 externals/
-brgen/
-
-# ==== ANALYSIS & RESEARCH ====
-yapyap/
-BATCH ANALYSIS/
-folder_analysis.md
-
-# ==== DIRECTIVES & PLANS ====
-*DIRECTIVES*.md
-*PLAN*.md
-PLAN_*.md
-
-# ==== MISC SCRIPTS (BR analysis) ====
-br_*.py
-!br_extractor.py
+brgen/.venv/
+brgen/output/
+brgen/models/
+yapyap/.venv/
 
 # Old/backup files
 *.old
+
+
+# CSV scan reports
+*.csv
+
+# Extra tools
+tools/
+
+# Separate project
+yapyap/

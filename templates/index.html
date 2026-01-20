@@ -20,6 +20,18 @@
                         <span id="status-text">Dormant</span>
                     </span>
                     <span class="interface-pill" id="interface-pill">No Interface</span>
+                    <!-- Inline Portal Status (hidden by default) -->
+                    <span class="portal-pill" id="portal-banner" style="display:none;">
+                        <span class="portal-pill-icon">👻</span>
+                        <span class="portal-pill-ssid" id="portal-banner-ssid">--</span>
+                        <span class="portal-pill-sep">|</span>
+                        <span class="portal-pill-mac" id="portal-banner-mac">--</span>
+                        <span class="portal-pill-sep">|</span>
+                        <span class="portal-pill-ch">CH<span id="portal-banner-channel">--</span></span>
+                        <span class="portal-pill-sep">|</span>
+                        <span class="portal-pill-cap"><span id="portal-banner-captured">0</span> caught</span>
+                        <button class="portal-pill-stop" id="btn-portal-stop" title="Close Gate">✕</button>
+                    </span>
                 </div>
             </div>
             <div class="topbar-right">
@@ -58,6 +70,7 @@
                 <button class="icon-btn" id="btn-settings" title="Configuration">⚙️</button>
             </div>
         </header>
+
 
         <!-- Main Content -->
         <main class="main-content">
@@ -162,6 +175,9 @@
                             <button class="btn btn-secondary" id="btn-wordlist" title="Fabricate Wordlist">
                                 <span>Fabricate</span>
                             </button>
+                            <button class="btn btn-ghost" id="btn-deduplicate" title="Merge redundant files and remove duplicate hashes">
+                                <span>Clean</span>
+                            </button>
                             <div class="attack-dropdown" id="crack-all-dropdown-container">
                                 <button class="btn btn-primary" id="btn-crack-all">
                                     <span id="crack-all-label">Solve Cases</span>
@@ -189,7 +205,7 @@
     <!-- Settings Modal -->
     <div class="modal" id="settings-modal">
         <div class="modal-backdrop"></div>
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-header">
                 <h3>Configuration</h3>
                 <button class="modal-close" id="modal-close">×</button>
@@ -210,6 +226,38 @@
                     </select>
                     <small>Select your listening device</small>
                 </div>
+
+                <div class="settings-divider"></div>
+                <h4 class="settings-section-title">👻 Phantom Gate</h4>
+
+                <div class="form-group">
+                    <label>Internet Source</label>
+                    <select id="setting-portal-in">
+                        <option value="">Select adapter...</option>
+                    </select>
+                    <small>Your internet connection (eth0, wwan0, etc)</small>
+                </div>
+                <div class="form-group">
+                    <label>Evil Twin Adapter</label>
+                    <select id="setting-portal-out">
+                        <option value="">Select adapter...</option>
+                    </select>
+                    <small>Wireless adapter for fake AP (requires AP mode support)</small>
+                </div>
+                <div class="form-group">
+                    <label class="filter-toggle">
+                        <input type="checkbox" id="setting-portal-capture" checked>
+                        Capture victim traffic
+                    </label>
+                    <small>Save all traffic to captures/portal_*.pcap</small>
+                </div>
+                <div class="form-group">
+                    <label class="filter-toggle">
+                        <input type="checkbox" id="setting-portal-forced">
+                        Forced Mode
+                    </label>
+                    <small>Intercept ALL requests (otherwise only Google/Facebook)</small>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -217,6 +265,7 @@
             </div>
         </div>
     </div>
+
 
     <!-- Brgen Password Generator Modal -->
     <div class="modal" id="wordlist-modal">
@@ -325,27 +374,168 @@
         <div class="modal-backdrop"></div>
         <div class="modal-dialog modal-lg">
             <div class="modal-header">
-                <h3>Configuration</h3>
+                <h3>Anterograde Amnesia</h3>
                 <button class="modal-close" id="autosolve-close">×</button>
             </div>
             <div class="modal-body">
-                <p class="modal-desc">Drag wordlists to set cracking priority.</p>
+                <p class="modal-desc">Configure wordlist and rule priority. Already-attempted combos are skipped.</p>
 
                 <div class="form-group">
                     <label>Wordlist Priority (drag to reorder)</label>
                     <div class="wordlist-queue" id="autosolve-queue">
                         <!-- Wordlists will be populated here -->
                     </div>
-                    <small>Top = tried first. Already-attempted combos are skipped automatically.</small>
                 </div>
 
-                <div class="info-box">
-                    <strong>Mode:</strong> AI-generated passwords only (no rules)
+                <div class="form-group">
+                    <label>Rule Priority (drag to reorder)</label>
+                    <div class="wordlist-queue" id="autosolve-rule-queue">
+                        <!-- Rules will be populated here -->
+                    </div>
+                    <small>Top = applied first. Include "(no rule)" for raw wordlist attempts.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>AI Context Words (optional)</label>
+                    <div class="ai-context-group">
+                        <button class="btn btn-secondary btn-sm" id="btn-autosolve-ai">Add Context</button>
+                        <span id="autosolve-context-status" class="context-status"></span>
+                    </div>
+                    <small>Generate context-specific passwords via AI chatbot</small>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="autosolve-cancel">Cancel</button>
                 <button class="btn btn-primary" id="btn-autosolve-start">Start Amnesia</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Context Modal -->
+    <div class="modal" id="ai-context-modal">
+        <div class="modal-backdrop"></div>
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3>AI Context Words</h3>
+                <button class="modal-close" id="ai-context-close">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">Generate passwords using AI. Copy the prompt, paste response.</p>
+
+                <div class="form-group">
+                    <label>Prompt to send to AI:</label>
+                    <textarea id="ai-prompt-text" class="form-textarea" rows="5"
+                        readonly>Generate 50 WiFi password candidates for a Brazilian network. Return as CSV (comma-separated, no spaces). Include: keyboard walks, number patterns, common words with suffixes. Example: qwerty123,12345678,senha1234</textarea>
+                    <button class="btn btn-secondary btn-sm" id="btn-copy-prompt">Copy Prompt</button>
+                </div>
+
+                <div class="form-group">
+                    <label>Paste AI response (CSV format):</label>
+                    <textarea id="ai-response-text" class="form-textarea" rows="4"
+                        placeholder="padariajoao,joao123,padaria2024"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="ai-context-cancel">Cancel</button>
+                <button class="btn btn-primary" id="btn-ai-context-save">Save Context</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Phantom Gate (Evil Portal) Modal -->
+    <div class="modal" id="portal-modal">
+        <div class="modal-backdrop"></div>
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3>👻 Phantom Gate</h3>
+                <button class="modal-close" id="portal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">Launch Evil Twin for <strong id="portal-target-essid">Unknown</strong></p>
+
+                <div class="portal-target-info">
+                    <span>BSSID: <code id="portal-target-bssid">--</code></span>
+                    <span>Channel: <code id="portal-target-channel">--</code></span>
+                </div>
+
+                <!-- Adapter Selection -->
+                <div class="form-group">
+                    <label>Internet Source</label>
+                    <select id="portal-in-adapter">
+                        <option value="">-- Select adapter --</option>
+                    </select>
+                    <small>Your internet connection (eth0, wwan0, etc)</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Evil Twin Adapter</label>
+                    <select id="portal-out-adapter">
+                        <option value="">-- Select adapter --</option>
+                    </select>
+                    <small>Wireless adapter for fake AP (must support AP mode)</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Mode</label>
+                    <select id="portal-mode">
+                        <option value="open">Open (Captive Portal)</option>
+                        <option value="wpa2">WPA2 (Stealth)</option>
+                    </select>
+                    <small>WPA2 mode uses a known password for seamless connection</small>
+                </div>
+
+                <div class="form-group" id="portal-password-group" style="display:none;">
+                    <label>WPA2 Password</label>
+                    <input type="text" id="portal-password" placeholder="Enter cracked password">
+                </div>
+
+
+
+                <div class="form-group">
+                    <label>Strategy</label>
+                    <select id="portal-strategy">
+                        <option value="karma" selected>Karma (Aggressive)</option>
+                        <option value="stealth">Stealth (Obfuscated)</option>
+                        <option value="passive">Passive (Patience)</option>
+                    </select>
+                    <small>
+                        <strong>Karma:</strong> Captive Portal, forces sign-in popup.<br>
+                        <strong>Stealth:</strong> Blocks HTTPS, redirects HTTP (Session Expired).<br>
+                        <strong>Passive:</strong> Allows traffic, only phishes targets.
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label class="filter-toggle">
+                        <input type="checkbox" id="portal-clone-bssid" checked>
+                        Clone BSSID (same MAC as target)
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label class="filter-toggle">
+                        <input type="checkbox" id="portal-deauth">
+                        Enable Deauth Loop
+                    </label>
+                    <small>Continuously kick victims off real AP</small>
+                </div>
+
+                <div class="portal-status" id="portal-live-status" style="display:none;">
+                    <div class="portal-status-header">
+                        <div class="status-spinner"></div>
+                        <span id="portal-status-text">Portal active...</span>
+                    </div>
+                    <div class="portal-credentials" id="portal-credentials">
+                        <h5>Captured Credentials</h5>
+                        <div id="portal-creds-list" class="creds-list"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="portal-cancel">Cancel</button>
+                <button class="btn btn-danger" id="btn-portal-launch">
+                    <span id="portal-launch-text">Open Gate</span>
+                </button>
             </div>
         </div>
     </div>

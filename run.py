@@ -140,6 +140,11 @@ def main():
     
     app = create_app()
     
+    # Silence noisy Flask logs
+    import logging
+    log_wrk = logging.getLogger('werkzeug')
+    log_wrk.setLevel(logging.ERROR)
+    
     try:
         app.run(host='0.0.0.0', port=5000, debug=False, threaded=True, use_reloader=False)
     except KeyboardInterrupt:

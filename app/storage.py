@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -34,6 +35,7 @@ class Storage:
     DEVICES_FILE = 'devices.json'
     HASHES_FILE = 'hashes.json'
     SETTINGS_FILE = 'settings.json'
+    PASSWORDS_FILE = 'passwords.json'
     
     def __init__(self, data_dir: Optional[str] = None):
         self.data_dir = Path(data_dir or self.DATA_DIR)
@@ -43,6 +45,7 @@ class Storage:
         self._networks: Dict[str, Network] = {}
         self._devices: Dict[str, Device] = {}
         self._hashes: Dict[str, HashFile] = {}
+        self._passwords: Dict[str, Dict[str, Any]] = {} # BSSID -> {password, hex, salt, timestamp}
         self._settings: Settings = create_settings()
         self._stats: Stats = create_stats()
         
@@ -51,11 +54,16 @@ class Storage:
         self._dirty_devices = False
         self._dirty_hashes = False
         self._dirty_settings = False
+        self._dirty_passwords = False
         
         # Ensure directories exist
         self.data_dir.mkdir(parents=True, exist_ok=True)
         for subdir in ('captures', 'hashes', 'wordlists', 'cracked'):
             Path(subdir).mkdir(exist_ok=True)
+        
+        # Lazy persistence settings
+        self._last_flush_time = 0.0
+        self._flush_interval = 10.0 # Save to disk at most every 10 seconds
         
         # Load existing data
         self._load_all()
@@ -88,8 +96,8 @@ class Storage:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             tmp_path.replace(path)
             return True
-        except IOError as e:
-            print(f"[!] Error saving {filename}: {e}")
+        except Exception as e:
+            print(f"[!] Error saving {filename} ({type(e).__name__}): {e}")
             if tmp_path.exists():
                 tmp_path.unlink()
             return False
@@ -100,13 +108,21 @@ class Storage:
             self._networks = self._load_json(self.NETWORKS_FILE) or {}
             self._devices = self._load_json(self.DEVICES_FILE) or {}
             self._hashes = self._load_json(self.HASHES_FILE) or {}
+            self._passwords = self._load_json(self.PASSWORDS_FILE) or {}
             settings = self._load_json(self.SETTINGS_FILE)
             if settings:
                 self._settings.update(settings)
     
-    def save_all(self) -> None:
-        """Force save all dirty data to disk."""
+    def save_all(self, force: bool = False) -> None:
+        """
+        Save dirty data to disk with rate limiting.
+        Set force=True to bypass the timer (e.g. on shutdown).
+        """
         with self._lock:
+            now = time.time()
+            if not force and (now - self._last_flush_time) < self._flush_interval:
+                return
+
             if self._dirty_networks:
                 self._save_json(self.NETWORKS_FILE, self._networks)
                 self._dirty_networks = False
@@ -119,10 +135,21 @@ class Storage:
             if self._dirty_settings:
                 self._save_json(self.SETTINGS_FILE, self._settings)
                 self._dirty_settings = False
+            if self._dirty_passwords:
+                self._save_json(self.PASSWORDS_FILE, self._passwords)
+                self._dirty_passwords = False
+            
+            self._last_flush_time = now
     
     def flush(self) -> None:
-        """Alias for save_all, flushes all pending changes."""
-        self.save_all()
+        """Alias for save_all, flushes all pending changes immediately."""
+        self.save_all(force=True)
+    
+    def _ensure_status(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure the status field exists in a network record."""
+        if 'status' not in record or record['status'] is None:
+            record['status'] = {'has_hash': False, 'cracked': False}
+        return record['status']
     
     # ─────────────────────────────────────────────────────────────
     # Network operations
@@ -160,11 +187,39 @@ class Storage:
                     record['clients'] = len(value)
                 elif field == 'hash_ids':
                     record['hash_ids'] = value
-                    record['status']['has_hash'] = len(value) > 0
+                    self._ensure_status(record)['has_hash'] = len(value) > 0
                 elif field == 'status':
-                    record['status'].update(value)
+                    self._ensure_status(record).update(value)
+                elif field == 'manual_cracked':
+                    record['manual_cracked'] = value
+                    # If manually marked as solved, also update status for UI consistency
+                    self._ensure_status(record)['cracked'] = value
+                    if value:
+                        # Register in universal password registry
+                        pw = record.get('cracked_password') or ''
+                        self._passwords[key] = {
+                            'password': pw,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        self._dirty_passwords = True
+                        
+                        # Propagate to linked hashes
+                        for hash_record in self._hashes.values():
+                            if hash_record.get('network_bssid') == key:
+                                hash_record['cracked'] = True
+                                hash_record['cracked_password'] = pw
+                                hash_record['cracked_at'] = datetime.now().isoformat()
+                                self._dirty_hashes = True
                 else:
                     record[field] = value
+            
+            # Universalizing: Check against known passwords registry
+            if key in self._passwords and not self._ensure_status(record)['cracked']:
+                pw_info = self._passwords[key]
+                self._ensure_status(record)['cracked'] = True
+                record['cracked_password'] = pw_info['password']
+                if 'hex' in pw_info: record['cracked_hex'] = pw_info['hex']
+                if 'salt' in pw_info: record['cracked_salt'] = pw_info['salt']
             
             record['last_seen'] = updates.get('last_seen', now)
             self._networks[key] = record
@@ -203,7 +258,7 @@ class Storage:
             if hash_path not in hash_ids:
                 hash_ids.append(hash_path)
                 record['hash_ids'] = hash_ids
-                record['status']['has_hash'] = True
+                self._ensure_status(record)['has_hash'] = True
                 self._dirty_networks = True
     
     def mark_network_cracked(self, bssid: str, password: str, 
@@ -215,12 +270,30 @@ class Storage:
             if key not in self._networks:
                 return
             record = self._networks[key]
-            record['status']['cracked'] = True
+            self._ensure_status(record)['cracked'] = True
             record['cracked_password'] = password
             record['cracked_hex'] = hex_repr
             record['cracked_salt'] = salt
             record['cracked_hash_path'] = hash_path
             self._dirty_networks = True
+
+            # Register in universal password registry (The Registry of Known Truths)
+            self._passwords[key] = {
+                'password': password,
+                'hex': hex_repr,
+                'salt': salt,
+                'hash_path': hash_path,
+                'timestamp': datetime.now().isoformat()
+            }
+            self._dirty_passwords = True
+
+            # Contagion: also mark all hashes linked to this network as cracked
+            for hash_record in self._hashes.values():
+                if hash_record.get('network_bssid') == key and not hash_record.get('cracked'):
+                    hash_record['cracked'] = True
+                    hash_record['cracked_password'] = password
+                    hash_record['cracked_at'] = datetime.now().isoformat()
+                    self._dirty_hashes = True
     
     def clear_networks(self) -> None:
         """Clear all network data (e.g., on interface change)."""
@@ -295,6 +368,23 @@ class Storage:
                 if value is not None:
                     record[field] = value
             
+            # Universalizing: inherit cracked status from network if matched
+            bssid = record.get('network_bssid')
+            if bssid and not record.get('cracked'):
+                # 1. Check current network suspects
+                net = self._networks.get(bssid.upper())
+                if net and (net.get('status', {}).get('cracked') or net.get('manual_cracked')):
+                    record['cracked'] = True
+                    record['cracked_password'] = net.get('cracked_password')
+                    record['cracked_at'] = datetime.now().isoformat()
+                
+                # 2. Check universal password registry
+                elif bssid.upper() in self._passwords:
+                    pw_info = self._passwords[bssid.upper()]
+                    record['cracked'] = True
+                    record['cracked_password'] = pw_info['password']
+                    record['cracked_at'] = pw_info['timestamp']
+
             self._hashes[path] = record
             self._dirty_hashes = True
             return record
@@ -330,7 +420,7 @@ class Storage:
                 for net in self._networks.values():
                     if path in net.get('hash_ids', []):
                         net['hash_ids'] = [h for h in net['hash_ids'] if h != path]
-                        net['status']['has_hash'] = len(net['hash_ids']) > 0
+                        self._ensure_status(net)['has_hash'] = len(net['hash_ids']) > 0
                         self._dirty_networks = True
     
     def clear_hashes(self) -> None:

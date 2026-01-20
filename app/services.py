@@ -17,7 +17,7 @@ from .logging import log, get_logger
 from .models import Network, HashFile, CaptureGroup
 
 # Import cracking module
-import cracking
+from . import cracking
 
 
 class HashService:
@@ -34,11 +34,12 @@ class HashService:
         Expected formats:
         - capture_ESSID_YYYYMMDD_HHMMSS-01.cap
         - ESSID_YYYYMMDD_HHMMSS.hc22000
+        - ESSID_vigilance.hc22000
         """
         essid = 'Unknown'
         try:
             base = filename
-            # Remove known suffixes
+            # Remove known file extensions
             for suffix in ('.cap', '.hc22000', '-01'):
                 base = base.replace(suffix, '')
             
@@ -48,20 +49,28 @@ class HashService:
             if parts and parts[0].lower() == 'capture':
                 parts = parts[1:]  # Remove 'capture' prefix
             
-            # Find where the date/time portion starts
-            # Look for YYYYMMDD pattern (8 digits)
-            date_idx = -1
+            # Find where the metadata/date portion starts
+            # Look for YYYYMMDD pattern (8 digits) OR 'vigilance' keyword
+            meta_idx = -1
             for i, part in enumerate(parts):
-                if len(part) == 8 and part.isdigit():
-                    date_idx = i
+                if (len(part) == 8 and part.isdigit()) or part.lower() == 'vigilance':
+                    meta_idx = i
                     break
             
-            if date_idx > 0:
-                # ESSID is everything before the date
-                essid = '_'.join(parts[:date_idx]) or 'Unknown'
+            if meta_idx > 0:
+                # ESSID is everything before the metadata
+                essid = '_'.join(parts[:meta_idx]) or 'Unknown'
+            elif meta_idx == 0 and len(parts) > 1:
+                # If metadata is at start (unlikely for capture), use rest or fallback
+                essid = parts[1]
             elif len(parts) >= 1:
-                # Fallback: use first part
-                essid = parts[0] or 'Unknown'
+                # Fallback: if no metadata found, the whole thing might be the ESSID
+                # (excluding the 'capture' if it was removed)
+                # But if it ends with 'vigilance' (exact match), remove it
+                if parts[-1].lower() == 'vigilance':
+                    essid = '_'.join(parts[:-1]) or 'Unknown'
+                else:
+                    essid = '_'.join(parts) or 'Unknown'
                 
         except Exception:
             pass
@@ -93,12 +102,27 @@ class HashService:
             active_paths.add(rel_path)
             
             essid = cls.extract_essid_from_filename(filename)
-            candidate_bssid = storage.find_bssid_by_essid(essid)
+            
+            # IMPROVEMENT: Try to get BSSID from hash content first (more reliable than filename)
+            bssid_from_content = None
+            try:
+                with open(full_path, 'r') as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        parts = first_line.split('*')
+                        if len(parts) >= 4:
+                            # hc22000 AP MAC is at index 3
+                            bssid_from_content = parts[3].upper()
+                            # Insert colons if missing
+                            if ':' not in bssid_from_content and len(bssid_from_content) == 12:
+                                bssid_from_content = ':'.join(bssid_from_content[i:i+2] for i in range(0, 12, 2))
+            except:
+                pass
+
+            candidate_bssid = bssid_from_content or storage.find_bssid_by_essid(essid)
+            
             size_bytes = os.path.getsize(full_path)
             timestamp = datetime.fromtimestamp(os.path.getmtime(full_path)).isoformat()
-            
-            # Preserve cracked status if already known
-            existing = storage.get_hash(rel_path)
             
             storage.upsert_hash(
                 rel_path,
@@ -157,6 +181,105 @@ class HashService:
             })
         
         return wordlists
+    
+    @classmethod
+    def consolidate_hashes(cls) -> Dict[str, int]:
+        """
+        Deduplicate and group all hashes.
+        - Merges multiple files for the same ESSID into one.
+        - Removes duplicate hash lines within files.
+        - Returns stats on what was cleaned up.
+        """
+        os.makedirs(cls.HASHES_DIR, exist_ok=True)
+        all_hashes: Dict[str, Set[str]] = {} # essid -> set of lines
+        cleaned = {'files_merged': 0, 'lines_removed': 0}
+        
+        initial_file_count = len([f for f in os.listdir(cls.HASHES_DIR) if f.endswith('.hc22000')])
+        
+        # 1. Collect all unique lines across all files
+        for filename in os.listdir(cls.HASHES_DIR):
+            if not filename.endswith('.hc22000'):
+                continue
+            
+            full_path = os.path.join(cls.HASHES_DIR, filename)
+            essid = cls.extract_essid_from_filename(filename)
+            
+            if essid not in all_hashes:
+                all_hashes[essid] = set()
+            
+            try:
+                with open(full_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            if line in all_hashes[essid]:
+                                cleaned['lines_removed'] += 1
+                            else:
+                                all_hashes[essid].add(line)
+                
+                # After reading, remove the old file (we will rewrite consolidated ones)
+                os.remove(full_path)
+            except Exception as e:
+                log(f"Consolidation read error for {filename}: {e}", "error")
+
+        # 2. Write back consolidated files
+        for essid, lines in all_hashes.items():
+            if not lines:
+                continue
+            
+            safe_essid = re.sub(r'[^a-zA-Z0-9_-]', '_', essid)
+            # Use a clean naming convention: ESSID_consolidated.hc22000
+            new_filename = f"{safe_essid}_consolidated.hc22000"
+            new_path = os.path.join(cls.HASHES_DIR, new_filename)
+            
+            try:
+                with open(new_path, 'w') as f:
+                    for line in sorted(list(lines)): # Sort for stability
+                        f.write(line + '\n')
+            except Exception as e:
+                log(f"Consolidation write error for {essid}: {e}", "error")
+
+        final_file_count = len([f for f in os.listdir(cls.HASHES_DIR) if f.endswith('.hc22000')])
+        cleaned['files_merged'] = initial_file_count - final_file_count
+        
+        # Trigger inventory sync to update storage with new file names
+        cls.sync_inventory()
+        return cleaned
+
+    @classmethod
+    def get_rules(cls) -> List[Dict[str, Any]]:
+        """Get list of available hashcat rule files."""
+        rules_dir = 'rules'
+        os.makedirs(rules_dir, exist_ok=True)
+        rules = []
+        
+        for filename in sorted(os.listdir(rules_dir)):
+            if not filename.endswith('.rule'):
+                continue
+            
+            full_path = os.path.join(rules_dir, filename)
+            if not os.path.isfile(full_path):
+                continue
+            
+            # Count non-comment, non-empty lines (approximate rule count)
+            rule_count = 0
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            rule_count += 1
+            except Exception:
+                pass
+            
+            rules.append({
+                'name': filename,
+                'path': os.path.relpath(full_path, os.getcwd()),
+                'rule_count': rule_count,
+                'multiplier': f'{rule_count}x' if rule_count else '',
+            })
+        
+        return rules
     
     @staticmethod
     def parse_cracked_line(line: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -274,13 +397,21 @@ class NetworkService:
     def get_networks_response() -> Dict[str, Any]:
         """Build the /api/networks response."""
         HashService.sync_inventory()
+        state = get_state()
         storage = get_storage()
         
+        session_start = state.session_start_time.isoformat()
+        networks = storage.get_all_networks()
+        
+        # Enrich with session info
+        for net in networks:
+            net['discovered_this_session'] = net.get('last_seen', '') >= session_start
+        
         return {
-            'networks': storage.get_all_networks(),
+            'networks': networks,
             'devices': storage.get_all_devices(),
             'hashes': storage.get_all_hashes(),
-            'count': len(storage.get_all_networks()),
+            'count': len(networks),
         }
     
     @staticmethod

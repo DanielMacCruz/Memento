@@ -34,6 +34,7 @@ class AppState:
         self.vigilant = False  # Constant passive scanning mode
         self.rolling_cracking = False  # Auto-solve background cracking
         self.wordlist_order: List[str] = []  # User-specified wordlist order for auto-solve
+        self.session_start_time = datetime.now()  # Track when this session started
         
         # Current operation targets
         self.monitor_interface: Optional[str] = None

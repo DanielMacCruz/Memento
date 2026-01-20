@@ -83,9 +83,11 @@ def get_cracking_assets():
             reverse=True
         )
         wordlists = HashService.get_wordlists()
+        rules = HashService.get_rules()
         return jsonify({
             'hashes': hashes,
             'wordlists': wordlists,
+            'rules': rules,
         })
     except Exception as e:
         return error_response(str(e), 500)
@@ -150,6 +152,19 @@ def handle_settings():
             
             storage.update_settings(interface=new_interface)
         
+        # Phantom Gate (Evil Portal) settings
+        if 'portal_in_adapter' in data:
+            storage.update_settings(portal_in_adapter=data['portal_in_adapter'])
+        
+        if 'portal_out_adapter' in data:
+            storage.update_settings(portal_out_adapter=data['portal_out_adapter'])
+        
+        if 'portal_capture_traffic' in data:
+            storage.update_settings(portal_capture_traffic=bool(data['portal_capture_traffic']))
+        
+        if 'portal_forced_mode' in data:
+            storage.update_settings(portal_forced_mode=bool(data['portal_forced_mode']))
+        
         storage.flush()
         return success_response(settings=dict(state.settings))
     
@@ -190,7 +205,16 @@ def stop_scan():
     state.attacking = False
     state.cracking = False
     state.vigilant = False
+    state.rolling_cracking = False
     sniff.graceful_shutdown = True
+    
+    # Stop reactive engine if active
+    try:
+        from .monitor import get_monitor
+        monitor = get_monitor()
+        monitor.stop()
+    except Exception:
+        pass
     
     try:
         subprocess.run("pkill -9 airodump-ng", shell=True, stderr=subprocess.DEVNULL)
@@ -203,6 +227,55 @@ def stop_scan():
     storage.update_stats(current_operation='Idle')
     
     return success_response('Operations stopped')
+
+
+@api.route('/stop_everything', methods=['POST'])
+def stop_everything():
+    """Nuclear option: stop all background tasks and the evil portal too."""
+    from .evil_portal import stop_portal, get_portal_state
+    
+    state = get_state()
+    storage = get_storage()
+    portal_state = get_portal_state()
+    
+    log('NUCLEAR STOP: Shutting down EVERY active module...', 'warning')
+    
+    # 1. Stop background workers
+    state.scanning = False
+    state.attacking = False
+    state.cracking = False
+    state.vigilant = False
+    state.rolling_cracking = False
+    sniff.graceful_shutdown = True
+    
+    # 2. Stop reactive engine if active
+    try:
+        from .monitor import get_monitor
+        get_monitor().stop()
+    except Exception:
+        pass
+    
+    # 2. Stop Evil Portal if active
+    if portal_state.active:
+        log('Deactivating Phantom Gate...', 'info')
+        stop_portal()
+    
+    # 3. Kill common processes
+    try:
+        subprocess.run("pkill -9 airodump-ng", shell=True, stderr=subprocess.DEVNULL)
+        subprocess.run("pkill -9 aireplay-ng", shell=True, stderr=subprocess.DEVNULL)
+        subprocess.run("pkill -9 hashcat", shell=True, stderr=subprocess.DEVNULL)
+        subprocess.run("pkill -9 hostapd", shell=True, stderr=subprocess.DEVNULL)
+        subprocess.run("pkill -9 dnsmasq", shell=True, stderr=subprocess.DEVNULL)
+        sniff.cleanup_processes()
+        log('All processes and modules stopped', 'success')
+    except Exception as e:
+        log(f'Stop everything error: {e}', 'error')
+    
+    storage.update_stats(current_operation='Idle')
+    storage.flush()
+    
+    return success_response('Everything stopped')
 
 
 @api.route('/vigilance', methods=['POST'])
@@ -243,6 +316,8 @@ def toggle_rolling():
     
     action = data.get('action', 'toggle')
     wordlist_order = data.get('wordlist_order', [])  # Optional ordered wordlist names
+    rule_order = data.get('rule_order', [])  # Optional ordered rule names
+    global_context_words = data.get('context_words', '')  # AI context words (CSV)
     
     if action == 'start' or (action == 'toggle' and not state.rolling_cracking):
         if state.rolling_cracking:
@@ -250,8 +325,10 @@ def toggle_rolling():
         if state.cracking:
             return error_response('Cannot start auto-solve while manual cracking')
         
-        # Store wordlist order in state for the worker to use
+        # Store configuration in state for the worker to use
         state.wordlist_order = wordlist_order
+        state.rule_order = rule_order
+        state.global_context_words = global_context_words
         
         thread = threading.Thread(target=run_rolling_cracker_worker)
         thread.daemon = True
@@ -491,6 +568,51 @@ def delete_hash():
         return error_response(str(e), 500)
 
 
+@api.route('/deduplicate_hashes', methods=['POST'])
+def deduplicate_hashes():
+    """Consolidate and deduplicate all hash files."""
+    try:
+        log('Starting hash deduplication and consolidation...', 'info')
+        stats = HashService.consolidate_hashes()
+        
+        msg = f"Consolidated {stats['files_merged']} files and removed {stats['lines_removed']} duplicate lines."
+        log(msg, 'success')
+        
+        return success_response(msg, stats=stats)
+    except Exception as e:
+        log(f'Deduplication error: {e}', 'error')
+        return error_response(str(e), 500)
+
+
+@api.route('/hash_context', methods=['POST'])
+def update_hash_context():
+    """Update AI context words for a hash."""
+    storage = get_storage()
+    data = request.json or {}
+    
+    hash_path = data.get('hash_path')
+    context_words = data.get('context_words', '')
+    
+    if not hash_path:
+        return error_response('Hash path required')
+    
+    try:
+        # Resolve path
+        resolved = HashService.resolve_path(hash_path, 'hashes')
+        rel_path = os.path.relpath(resolved, os.getcwd())
+        
+        # Update the hash record
+        storage.upsert_hash(rel_path, ai_context_words=context_words)
+        storage.flush()
+        
+        log(f'Updated AI context for {os.path.basename(resolved)}', 'info')
+        return success_response('Context updated')
+        
+    except Exception as e:
+        log(f'Error updating hash context: {e}', 'error')
+        return error_response(str(e), 500)
+
+
 # ─────────────────────────────────────────────────────────────
 # SSE Stream
 # ─────────────────────────────────────────────────────────────
@@ -644,3 +766,136 @@ def wordlist_status():
             'patterns': {},
         })
 
+
+# ─────────────────────────────────────────────────────────────
+# Phantom Gate (Evil Portal)
+# ─────────────────────────────────────────────────────────────
+
+@api.route('/adapters', methods=['GET'])
+def get_adapters():
+    """Get all network adapters for portal configuration."""
+    try:
+        from .evil_portal import get_available_adapters
+        adapters = get_available_adapters()
+        return jsonify(adapters)
+    except Exception as e:
+        return error_response(str(e), 500)
+
+
+@api.route('/portal/start', methods=['POST'])
+def start_portal():
+    """
+    Start Evil Twin portal for a target network.
+    
+    Body:
+        bssid: Target AP BSSID
+        essid: Target SSID
+        channel: Channel number
+        mode: 'open' or 'wpa2'
+        password: WPA2 password (required if mode='wpa2')
+        portal_type: 'google', 'facebook', or 'generic'
+        forced_mode: Force phishing on ALL requests
+        clone_bssid: Clone target's MAC address
+        deauth: Enable continuous deauth
+    """
+    from .evil_portal import start_portal as _start_portal, get_portal_state
+    
+    state = get_state()
+    portal_state = get_portal_state()
+    data = request.json or {}
+    
+    # Validate required fields
+    essid = data.get('essid')
+    bssid = data.get('bssid')
+    channel = data.get('channel')
+    
+    if not all([essid, bssid, channel]):
+        return error_response('essid, bssid, and channel are required')
+    
+    if portal_state.active:
+        return error_response('Portal already active. Stop it first.')
+    
+    # Get adapter config from settings or request
+    in_adapter = data.get('in_adapter') or state.settings.get('portal_in_adapter')
+    out_adapter = data.get('out_adapter') or state.settings.get('portal_out_adapter')
+    
+    if not in_adapter or not out_adapter:
+        return error_response('Internet and Evil Twin adapters must be configured in settings')
+    
+    if in_adapter == out_adapter:
+        return error_response('Internet and Evil Twin adapters must be different')
+    
+    # Portal options
+    mode = data.get('mode', 'open')
+    password = data.get('password')
+    strategy = data.get('strategy', 'karma')
+    # Backward compat
+    if 'forced_mode' in data and 'strategy' not in data:
+        strategy = 'karma' if data.get('forced_mode') else 'passive'
+        
+    clone_bssid = data.get('clone_bssid', True)
+    capture_traffic = data.get('capture_traffic', state.settings.get('portal_capture_traffic', True))
+    deauth = data.get('deauth', False)
+    
+    if mode == 'wpa2' and not password:
+        return error_response('Password required for WPA2 mode')
+    
+    log(f'Starting Phantom Gate for {essid}...', 'info')
+    
+    success = _start_portal(
+        essid=essid,
+        bssid=bssid,
+        channel=channel,
+        in_interface=in_adapter,
+        out_interface=out_adapter,
+        mode=mode,
+        password=password,
+        strategy=strategy,
+        capture_traffic=capture_traffic,
+        clone_bssid=clone_bssid,
+        deauth=deauth,
+    )
+    
+    if success:
+        log(f'Phantom Gate ACTIVE for {essid}', 'success')
+        return success_response('Portal started', target=essid)
+    else:
+        log('Phantom Gate failed to start', 'error')
+        return error_response('Failed to start portal. Check logs.', 500)
+
+
+@api.route('/portal/stop', methods=['POST'])
+def stop_portal():
+    """Stop the Evil Portal and restore original state."""
+    from .evil_portal import stop_portal as _stop_portal, get_portal_state
+    
+    portal_state = get_portal_state()
+    
+    if not portal_state.active:
+        return error_response('No active portal')
+    
+    target = portal_state.target_essid
+    _stop_portal()
+    
+    log(f'Phantom Gate stopped for {target}', 'info')
+    return success_response('Portal stopped')
+
+
+@api.route('/portal/status', methods=['GET'])
+def get_portal_status():
+    """Get current portal status and captured credentials."""
+    from .evil_portal import get_portal_status as _get_status
+    
+    return jsonify(_get_status())
+
+
+@api.route('/portal/credentials', methods=['GET'])
+def get_captured_credentials():
+    """Get all captured credentials."""
+    from .evil_portal import get_portal_state
+    
+    portal_state = get_portal_state()
+    return jsonify({
+        'credentials': portal_state.captured_credentials,
+        'count': len(portal_state.captured_credentials),
+    })

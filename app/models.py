@@ -120,6 +120,11 @@ class Settings(TypedDict, total=False):
     """User-configurable settings."""
     band: str
     interface: Optional[str]
+    # Phantom Gate (Evil Portal) settings
+    portal_in_adapter: Optional[str]    # Internet source (eth0, wwan0, etc)
+    portal_out_adapter: Optional[str]   # Evil Twin adapter (wlan0)
+    portal_capture_traffic: bool        # Save victim traffic to captures/
+    portal_forced_mode: bool            # Force phishing on ALL requests
 
 
 # Factory functions for creating properly initialized records
@@ -199,4 +204,9 @@ def create_settings() -> Settings:
     return Settings(
         band='abg',
         interface=None,
+        portal_in_adapter=None,
+        portal_out_adapter=None,
+        portal_capture_traffic=True,
+        portal_forced_mode=False,
     )
+

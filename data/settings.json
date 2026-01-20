@@ -1,0 +1,8 @@
+{
+  "band": "abg",
+  "interface": "wlan0",
+  "portal_in_adapter": "eth0",
+  "portal_out_adapter": "wlan0",
+  "portal_capture_traffic": true,
+  "portal_forced_mode": false
+}

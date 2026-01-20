@@ -11,6 +11,8 @@ import time
 import subprocess
 import builtins
 import glob
+import re
+import select
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -21,7 +23,8 @@ from .logging import log, get_logger
 
 # Import core sniff functionality
 import memento as sniff
-import cracking
+from . import cracking
+from .monitor import get_monitor
 
 
 def cleanup_orphan_captures(essid: str, bssid: str) -> int:
@@ -53,7 +56,7 @@ def cleanup_orphan_captures(essid: str, bssid: str) -> int:
     return deleted
 
 def run_scan_worker() -> None:
-    """Background worker for network scanning."""
+    """Background worker for network scanning using WirelessMonitor."""
     state = get_state()
     storage = get_storage()
     
@@ -61,124 +64,44 @@ def run_scan_worker() -> None:
     state.scanning = True
     storage.update_stats(
         scan_start_time=datetime.now().isoformat(),
-        current_operation='Scanning for networks...',
+        current_operation='Scanning (Reactive Engine)...',
     )
     
-    csv_file = None
-    scan_proc = None
-    
-    log('Starting network scan...', 'info')
-    log(f'Band: {state.settings["band"]}', 'info')
-    
-    def publish_networks(parsed_networks, elapsed=None):
-        """Update state with parsed networks."""
-        if not parsed_networks:
-            storage.mark_all_cached(set())
-            storage.update_stats(networks_scanned=0)
-            return
-        
-        station_counts = sniff.get_station_counts(csv_file) if csv_file and os.path.exists(csv_file) else {}
-        stations_by_bssid = sniff.get_all_stations_by_bssid(csv_file) if csv_file and os.path.exists(csv_file) else {}
-        
-        payload = []
-        for net in parsed_networks:
-            bssid_upper = net['bssid'].upper()
-            stations = stations_by_bssid.get(bssid_upper, [])
-            
-            payload.append({
-                'bssid': net['bssid'],
-                'essid': net['essid'],
-                'channel': net['channel'],
-                'power': net.get('power', '-50'),
-                'encryption': 'WPA2-PSK',
-                'has_clients': len(stations) > 0,
-                'clients': len(stations),
-                'stations': stations,
-            })
-        
-        state.merge_scan_results(payload)
-        storage.update_stats(networks_scanned=len(payload))
-        
-        if elapsed is not None:
-            log(f'Found {len(payload)} networks ({elapsed}s elapsed)...', 'info')
-        else:
-            log(f'Found {len(payload)} networks total', 'info')
+    log('Starting network scan using Reactive Engine...', 'info')
     
     try:
-        sniff.BAND = state.settings['band']
-        
-        # Get or detect interface
-        if state.settings['interface']:
-            interface = state.settings['interface']
-            log(f'Using configured interface: {interface}', 'info')
+        # Interface discovery
+        interface = state.settings.get('interface') or sniff.get_wireless_interface(auto_select=True)
+        if not state.monitor_interface:
+            log(f'Enabling monitor mode on {interface}...', 'info')
+            mon_interface = sniff.start_monitor_mode(interface)
+            state.monitor_interface = mon_interface
         else:
-            log('Auto-detecting wireless interface...', 'info')
-            interfaces = sniff.get_all_wireless_interfaces()
-            if not interfaces:
-                raise Exception("No wireless interface found")
-            interface = interfaces[0]
-            storage.update_settings(interface=interface)
-            if len(interfaces) > 1:
-                log(f'Multiple interfaces found, using {interface}', 'warning')
+            mon_interface = state.monitor_interface
         
-        log(f'Using interface: {interface}', 'info')
+        # Start the engine
+        monitor = get_monitor(mon_interface)
+        monitor.start()
         
-        # Start monitor mode
-        log('Starting monitor mode...', 'info')
-        log('Stopping NetworkManager and wpa_supplicant...', 'info')
-        mon_interface = sniff.start_monitor_mode(interface)
-        state.monitor_interface = mon_interface
-        log(f'Monitor mode enabled: {mon_interface}', 'success')
+        log('Reactive Engine scanning active', 'success')
         
-        # Scan
-        scan_duration = 120
-        log(f'Scanning for {scan_duration}s to detect networks and clients...', 'info')
+        # Scan for 30s by default if not in vigilance
+        scan_duration = 30
+        start_time = time.time()
         
-        csv_file, scan_proc = sniff.scan_networks(mon_interface, duration=scan_duration, background=True)
-        
-        if not csv_file:
-            log('Failed to start scan', 'error')
-            return
-        
-        scan_start = time.time()
-        last_update = 0
-        
-        while time.time() - scan_start < scan_duration:
+        while time.time() - start_time < scan_duration:
             if not state.scanning:
-                log('Scan stopped by user', 'warning')
-                if scan_proc:
-                    sniff.terminate_process(scan_proc, name='airodump-ng scan', force=True)
-                    scan_proc = None
-                subprocess.run("pkill -9 airodump-ng", shell=True, stderr=subprocess.DEVNULL)
                 break
-            
-            elapsed = int(time.time() - scan_start)
-            
-            if elapsed - last_update >= 15:
-                last_update = elapsed
-                if os.path.exists(csv_file):
-                    networks = sniff.parse_networks(csv_file)
-                    publish_networks(networks, elapsed=elapsed)
-            
             time.sleep(1)
-        
-        if scan_proc:
-            sniff.terminate_process(scan_proc, name='airodump-ng scan')
-            scan_proc = None
-        
-        if csv_file and os.path.exists(csv_file):
-            log('Parsing discovered networks...', 'info')
-            networks = sniff.parse_networks(csv_file)
-            publish_networks(networks)
-            log(f'Scan complete: {len(networks)} PSK networks total', 'success')
+            
+        if not state.vigilant:
+            monitor.stop()
+            
+        log('Scan phase complete', 'success')
         
     except Exception as e:
         log(f'Scan error: {str(e)}', 'error')
-        import traceback
-        traceback.print_exc()
     finally:
-        if scan_proc:
-            sniff.terminate_process(scan_proc, name='airodump-ng scan', force=True)
         state.scanning = False
         storage.update_stats(current_operation='Idle')
         storage.flush()
@@ -446,12 +369,15 @@ def run_crack_worker(task_list: List[Dict[str, Any]]) -> None:
                         log(f'[{idx}/{total}] Case solved! Evidence saved to {result.get("output_file")}', 'success')
                     else:
                         exit_code = result.get('exit_code')
-                        log(f'[{idx}/{total}] No matches (exit {exit_code})', 'warning')
+                        log(f'[{idx}/{total}] Finished (exit {exit_code})', 'warning')
                         
-                        # Exit code 1 means exhausted - record attempt
-                        if exit_code == 1:
+                        # Recorded only if fully exhausted or finished naturally
+                        # Hashcat: 0 = Finished/Exhausted, 1 = Cracked
+                        if exit_code in (0, 1):
                             if storage.add_cracking_attempt(task['hash_rel'], mask_type, None):
                                 log(f'[{idx}/{total}] Recorded mask attempt: {mask_desc}', 'info')
+                        else:
+                            log(f'[{idx}/{total}] Attempt interrupted (code {exit_code}). Not recorded.', 'warning')
                         
                 except Exception as e:
                     log(f'[{idx}/{total}] Mask attack error: {e}', 'error')
@@ -489,12 +415,14 @@ def run_crack_worker(task_list: List[Dict[str, Any]]) -> None:
                         log(f'[{idx}/{total}] Case solved! Evidence saved to {result.get("output_file")}', 'success')
                     else:
                         exit_code = result.get('exit_code')
-                        log(f'[{idx}/{total}] No matches (exit {exit_code})', 'warning')
+                        log(f'[{idx}/{total}] Finished (exit {exit_code})', 'warning')
                         
-                        # Exit code 1 means all passwords exhausted - record the attempt
-                        if exit_code == 1:
+                        # Record only if hashcat finished the wordlist (0 or 1)
+                        if exit_code in (0, 1):
                             if storage.add_cracking_attempt(task['hash_rel'], wordlist_name, rule_name):
                                 log(f'[{idx}/{total}] Recorded attempt: {wordlist_name}' + (f' + {rule_name}' if rule_name else ''), 'info')
+                        else:
+                            log(f'[{idx}/{total}] Attempt interrupted (code {exit_code}). Not recorded.', 'warning')
                         
                 except Exception as e:
                     log(f'[{idx}/{total}] Cracking error: {e}', 'error')
@@ -514,13 +442,7 @@ def run_crack_worker(task_list: List[Dict[str, Any]]) -> None:
 
 def run_vigilance_worker() -> None:
     """
-    Vigilance Mode: Constant passive scanning.
-    
-    Listens continuously for handshakes without active deauth.
-    - Updates networks and clients in real-time
-    - Extracts valid handshakes using hcxpcapngtool
-    - Auto-cleans garbage captures (no valid handshakes)
-    - Runs indefinitely until stopped by user
+    Vigilance Mode: Constant background monitoring using hcxdumptool.
     """
     state = get_state()
     storage = get_storage()
@@ -529,180 +451,153 @@ def run_vigilance_worker() -> None:
     state.vigilant = True
     storage.update_stats(
         scan_start_time=datetime.now().isoformat(),
-        current_operation='Vigilance: Watching...',
+        current_operation='Vigilance: Active',
     )
     
-    log('Vigilance Mode activated - Watching the airwaves...', 'success')
-    log('Passive handshake capture enabled. No active attacks.', 'info')
+    log('Vigilance Mode activated - The engine is always watching (hcxdumptool).', 'success')
     
-    csv_file = None
-    capture_proc = None
-    cycle_count = 0
+    capture_file = 'captures/vigilance.pcapng'
     
     try:
-        # Ensure monitor mode
+        # Interface discovery
         interface = state.settings.get('interface') or sniff.get_wireless_interface(auto_select=True)
-        if not state.monitor_interface:
-            log(f'Enabling monitor mode on {interface}...', 'info')
-            mon_interface = sniff.start_monitor_mode(interface)
-            state.monitor_interface = mon_interface
-            log(f'Monitor mode enabled: {mon_interface}', 'success')
-        else:
-            mon_interface = state.monitor_interface
-            log(f'Using existing monitor interface: {mon_interface}', 'info')
         
-        band = state.settings.get('band', 'abg')
-        sniff.BAND = band
+        # hcxdumptool v7 prefers the raw interface, not mon interface
+        if state.monitor_interface:
+            log(f"Stopping monitor mode on {state.monitor_interface} for hcxdumptool...", "info")
+            sniff.cleanup_processes()
+            state.monitor_interface = None
+            time.sleep(2)
+
+        # Ensure directory exists
+        os.makedirs('captures', exist_ok=True)
+        # Delete old vigilance pcap to start fresh (v7 won't overwrite)
+        if os.path.exists(capture_file):
+            try:
+                os.remove(capture_file)
+            except:
+                pass
+
+        # Launch hcxdumptool
+        # -i: interface, -w: output file, -F: all frequencies, --rds=2: show PMKID/Handshakes
+        cmd = [
+            'hcxdumptool',
+            '-i', interface,
+            '-w', capture_file,
+            '-F',
+            '--rds=2'
+        ]
         
-        # Continuous loop
+        log(f"Starting hcxdumptool on {interface} (v7 BPF Engine)...", "info")
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        
+        last_harvest = time.time()
+        
         while state.vigilant:
-            cycle_count += 1
-            cycle_start = time.time()
-            
-            # Create capture file for this cycle
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            capture_prefix = f"vigilance_{timestamp}"
-            cap_log = f"{capture_prefix}.log"
-            
-            storage.update_stats(current_operation=f'Vigilance: Cycle {cycle_count}')
-            log(f'Cycle {cycle_count}: Starting 60s passive capture...', 'info')
-            
-            # Ensure channel hopping is enabled before each cycle
-            sniff.ensure_channel_hopping(mon_interface)
-            
-            # Start airodump-ng in passive mode (no deauth)
-            cmd = f"airodump-ng {mon_interface} --band {band} -w {capture_prefix} --output-format csv,pcap 2>{cap_log}"
-            capture_proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL)
-            sniff.active_processes.append(capture_proc)
-            
-            # Monitor for 60 seconds
-            cycle_duration = 60
-            last_network_update = 0
-            
-            for elapsed in range(cycle_duration):
-                if not state.vigilant:
-                    log('Vigilance mode stopping...', 'warning')
-                    break
-                
-                # Update networks every 15 seconds
-                if elapsed - last_network_update >= 15:
-                    last_network_update = elapsed
-                    csv_candidates = [f"{capture_prefix}-01.csv", f"{capture_prefix}.csv"]
-                    for csv_candidate in csv_candidates:
-                        if os.path.exists(csv_candidate):
-                            csv_file = csv_candidate
-                            networks = sniff.parse_networks(csv_file)
-                            if networks:
-                                # Get station data
-                                stations_map = sniff.get_all_stations_by_bssid(csv_file)
-                                
-                                # Merge into storage
-                                active_bssids = set()
-                                with storage.batch_update():
-                                    for net in networks:
-                                        bssid = net.get('bssid', '').upper()
-                                        if not bssid:
-                                            continue
-                                        active_bssids.add(bssid)
-                                        
-                                        stations = stations_map.get(bssid, [])
-                                        storage.upsert_network(
-                                            bssid,
-                                            essid=net.get('essid'),
-                                            channel=net.get('channel'),
-                                            power=net.get('power'),
-                                            encryption=net.get('encryption', 'WPA2-PSK'),
-                                            stations=stations,
-                                            clients=len(stations),
-                                            has_clients=len(stations) > 0,
-                                            cached=False,
-                                            last_seen=datetime.now().isoformat(),
-                                        )
-                                        
-                                        for mac in stations:
-                                            storage.upsert_device(mac.upper(), bssid)
-                                
-                                storage.update_stats(networks_scanned=len(networks))
-                            break
-                
-                time.sleep(1)
-            
-            # Stop capture
-            if capture_proc:
-                sniff.terminate_process(capture_proc, name='vigilance capture')
-                capture_proc = None
-            
+            # Check if user deactivated
             if not state.vigilant:
                 break
             
-            # Check for handshakes in the captured data
-            cap_file = f"{capture_prefix}-01.cap"
-            if os.path.exists(cap_file) and os.path.getsize(cap_file) > 1000:
-                log(f'Analyzing capture for handshakes...', 'info')
+            # Non-blocking read from stdout
+            r, _, _ = select.select([proc.stdout], [], [], 0.5)
+            if r:
+                line = proc.stdout.readline()
+                if line:
+                    line = line.strip()
+                    # hcxdumptool v7 RDS mode 2 output parsing
+                    # Example indicators: [P] for PMKID, [2] or [3] for Handshakes
+                    if any(indicator in line for indicator in ['[P]', '[1]', '[2]', '[3]']):
+                        log(f"Capture Event: {line}", "success")
+            
+            # Periodic harvesting every 2 minutes
+            if time.time() - last_harvest > 120:
+                if os.path.exists(capture_file):
+                    log("Vigilance: Periodic hash harvest...", "info")
+                    harvest_hashes(capture_file)
+                    HashService.sync_inventory()
+                last_harvest = time.time()
+
+            # Check if process is still running
+            if proc.poll() is not None:
+                log(f"hcxdumptool exited with code {proc.returncode}", "error")
+                break
                 
-                # Try to extract handshakes with hcxpcapngtool
-                hash_file = f"hashes/vigilance_{timestamp}.hc22000"
-                try:
-                    result = subprocess.run(
-                        f"hcxpcapngtool -o {hash_file} {cap_file} 2>&1",
-                        shell=True, capture_output=True, text=True, timeout=30
-                    )
-                    
-                    if os.path.exists(hash_file) and os.path.getsize(hash_file) > 0:
-                        hash_size = os.path.getsize(hash_file)
-                        log(f'HANDSHAKE CAPTURED! {hash_file} ({hash_size} bytes)', 'success')
-                        storage.increment_stat('handshakes_captured')
-                        
-                        # Move capture to captures folder
-                        new_cap_path = f"captures/{os.path.basename(cap_file)}"
-                        try:
-                            os.rename(cap_file, new_cap_path)
-                        except:
-                            pass
-                        
-                        # Sync hash inventory
-                        HashService.sync_inventory()
-                    else:
-                        # No valid handshake - clean up garbage
-                        log(f'No handshakes in cycle {cycle_count}, cleaning up...', 'info')
-                        
-                except subprocess.TimeoutExpired:
-                    log('Handshake analysis timed out', 'warning')
-                except Exception as e:
-                    log(f'Handshake analysis error: {e}', 'error')
+        # Cleanup
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             
-            # Clean up cycle files (garbage collection)
-            cleanup_patterns = [
-                f"{capture_prefix}-*",
-                f"{capture_prefix}.*"
-            ]
-            for pattern in cleanup_patterns:
-                result = subprocess.run(f"ls {pattern} 2>/dev/null", shell=True, capture_output=True, text=True)
-                for f in result.stdout.split():
-                    if f and os.path.exists(f) and 'hc22000' not in f:
-                        try:
-                            os.remove(f)
-                        except:
-                            pass
-            
-            storage.flush()
-            
-            # Brief pause between cycles
-            if state.vigilant:
-                time.sleep(2)
+        log('Vigilance Mode stopped', 'info')
         
     except Exception as e:
         log(f'Vigilance error: {str(e)}', 'error')
-        import traceback
-        traceback.print_exc()
     finally:
-        if capture_proc:
-            sniff.terminate_process(capture_proc, name='vigilance capture', force=True)
-        subprocess.run("pkill -9 airodump-ng", shell=True, stderr=subprocess.DEVNULL)
         state.vigilant = False
         storage.update_stats(current_operation='Idle')
         storage.flush()
-        log('Vigilance Mode deactivated', 'info')
+
+
+def harvest_hashes(pcap_path: str):
+    """Run hcxpcapngtool and split hashes into individual files."""
+    tmp_hash = "/tmp/memento_harvest.hc22000"
+    if os.path.exists(tmp_hash):
+        try:
+            os.remove(tmp_hash)
+        except:
+            pass
+        
+    try:
+        subprocess.run(['hcxpcapngtool', '-o', tmp_hash, pcap_path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if os.path.exists(tmp_hash) and os.path.getsize(tmp_hash) > 0:
+            split_hc22000_file(tmp_hash, 'hashes')
+    except Exception as e:
+        log(f"Harvest error: {e}", "error")
+
+
+def split_hc22000_file(input_file: str, output_dir: str):
+    """Split a bulk .hc22000 file into individual files based on ESSID."""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    with open(input_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            
+            parts = line.split('*')
+            if len(parts) >= 6:
+                essid_hex = parts[5]
+                try:
+                    essid = bytes.fromhex(essid_hex).decode('utf-8', 'ignore')
+                    safe_essid = re.sub(r'[^a-zA-Z0-9_-]', '_', essid)
+                    if not safe_essid:
+                        safe_essid = f"unknown_{essid_hex[:8]}"
+                    
+                    out_file = os.path.join(output_dir, f"{safe_essid}_vigilance.hc22000")
+                    
+                    # Deduplicate: Only append if hash not already in file
+                    existing_hashes = set()
+                    if os.path.exists(out_file):
+                        with open(out_file, 'r') as of:
+                            for l in of:
+                                existing_hashes.add(l.strip())
+                    
+                    if line not in existing_hashes:
+                        with open(out_file, 'a') as of:
+                            of.write(line + '\n')
+                except Exception:
+                    pass
 
 
 def run_rolling_cracker_worker() -> None:
@@ -870,15 +765,22 @@ def run_rolling_cracker_worker() -> None:
                 # Get final exit code
                 exit_code = proc.returncode if proc.returncode is not None else proc.wait()
                 
-                # Record attempt - for virtual wordlists, use the path as identifier
-                if is_mask_attack:
-                    wordlist_name = wordlist_path  # e.g., '__MASK_8DIGIT__'
+                # Record attempt ONLY if naturally finished or cracked
+                # Hashcat: 0 = Finished/Exhausted, 1 = Cracked
+                if exit_code in (0, 1):
+                    if is_mask_attack:
+                        wordlist_name = wordlist_path  # e.g., '__MASK_8DIGIT__'
+                    else:
+                        wordlist_name = os.path.basename(wordlist_path)
+                    rule_name = os.path.basename(job['rule_path']) if job['rule_path'] else ''
+                    
+                    if storage.add_cracking_attempt(hash_path, wordlist_name, rule_name):
+                        if exit_code == 0:
+                            log(f'{essid}: no match with {job["description"]}', 'info')
                 else:
-                    wordlist_name = os.path.basename(wordlist_path)
-                rule_name = os.path.basename(job['rule_path']) if job['rule_path'] else ''
-                storage.add_cracking_attempt(hash_path, wordlist_name, rule_name)
+                    log(f'{essid}: Attempt interrupted (code {exit_code}). Not recording.', 'warning')
                 
-                if exit_code == 0:
+                if exit_code == 1:
                     # Cracked! Check output file for password
                     log(f'CRACKED {essid}!', 'success')
                     storage.increment_stat('hashes_cracked')

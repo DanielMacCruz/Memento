@@ -1657,3 +1657,284 @@ select option:hover {
 .modal-lg .modal-dialog {
     max-width: 600px;
 }
+
+/* Form textarea for AI context */
+.form-textarea {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: 'Courier Prime', monospace;
+    font-size: 0.875rem;
+    resize: vertical;
+    min-height: 80px;
+}
+
+.form-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.form-textarea[readonly] {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+}
+
+.ai-context-group {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.context-status {
+    font-size: 0.8rem;
+    color: var(--success);
+}
+
+/* AI Context button spacing */
+#btn-copy-prompt {
+    margin-top: var(--space-sm);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PHANTOM GATE - Evil Portal
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Portal button on network cards */
+.network-portal-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #2c1d54 0%, #1a0f33 100%);
+    border: 1px solid #7d5bb5;
+    border-radius: var(--radius-sm);
+    color: #d4c6e9;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    opacity: 0.7;
+}
+
+.network-portal-btn:hover {
+    opacity: 1;
+    background: linear-gradient(135deg, #3d2a6b 0%, #251647 100%);
+    box-shadow: 0 0 12px rgba(125, 91, 181, 0.6);
+    transform: scale(1.1);
+    border-color: #a084d6;
+}
+
+.network-item:hover .network-portal-btn {
+    opacity: 1;
+}
+
+/* Settings modal divider and section title */
+.settings-divider {
+    height: 1px;
+    background: var(--border);
+    margin: var(--space-lg) 0;
+}
+
+.settings-section-title {
+    font-family: 'Special Elite', monospace;
+    font-size: 1rem;
+    color: #a084d6;
+    margin-bottom: var(--space-md);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Portal modal target info */
+.portal-target-info {
+    display: flex;
+    gap: var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-lg);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.portal-target-info code {
+    font-family: 'Courier Prime', monospace;
+    color: var(--accent);
+}
+
+/* Portal live status */
+.portal-status {
+    padding: var(--space-md);
+    background: linear-gradient(135deg, rgba(44, 29, 84, 0.3) 0%, rgba(26, 15, 51, 0.4) 100%);
+    border: 1px solid #7d5bb5;
+    border-radius: var(--radius-md);
+    margin-top: var(--space-lg);
+}
+
+.portal-status-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+    color: #d4c6e9;
+    font-weight: 500;
+}
+
+.portal-status .status-spinner {
+    border-color: #4a3a6a;
+    border-top-color: #a084d6;
+}
+
+/* Captured credentials list */
+.portal-credentials {
+    border-top: 1px solid #4a3a6a;
+    padding-top: var(--space-md);
+}
+
+.portal-credentials h5 {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: var(--space-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.creds-list {
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.cred-item {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-xs) var(--space-sm);
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-xs);
+    font-family: 'Courier Prime', monospace;
+    font-size: 0.8rem;
+}
+
+.cred-email {
+    flex: 1;
+    color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cred-pass {
+    color: var(--success);
+    font-weight: 500;
+}
+
+.cred-time {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.cred-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 0.85rem;
+    padding: var(--space-sm);
+    text-align: center;
+}
+
+/* Portal launch button styling */
+#btn-portal-launch {
+    background: linear-gradient(135deg, #5a3d8a 0%, #3d2a6b 100%);
+    border: 1px solid #7d5bb5;
+}
+
+#btn-portal-launch:hover:not(:disabled) {
+    background: linear-gradient(135deg, #6b4d9f 0%, #4a357f 100%);
+    box-shadow: 0 0 12px rgba(125, 91, 181, 0.5);
+}
+
+#btn-portal-launch:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PORTAL STATUS PILL (inline in topbar)
+   ═══════════════════════════════════════════════════════════════ */
+
+.portal-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: linear-gradient(135deg, #2c1d54 0%, #1a0f33 100%);
+    border: 1px solid #7d5bb5;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    animation: portal-glow 2s ease-in-out infinite;
+}
+
+@keyframes portal-glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 4px rgba(125, 91, 181, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 10px rgba(125, 91, 181, 0.6);
+    }
+}
+
+.portal-pill-icon {
+    font-size: 0.9rem;
+}
+
+.portal-pill-ssid {
+    color: #C084FC;
+    font-weight: 600;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.portal-pill-sep {
+    color: #4a357f;
+}
+
+.portal-pill-mac {
+    color: #9B8AC4;
+    font-family: 'Courier Prime', monospace;
+    font-size: 0.65rem;
+}
+
+.portal-pill-ch {
+    color: #E9D5FF;
+}
+
+.portal-pill-cap {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.portal-pill-stop {
+    background: rgba(220, 38, 38, 0.3);
+    border: 1px solid #dc2626;
+    color: #fca5a5;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 0.65rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: all 0.2s;
+}
+
+.portal-pill-stop:hover {
+    background: #dc2626;
+    color: white;
+}
