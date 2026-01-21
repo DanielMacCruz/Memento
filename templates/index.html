@@ -172,10 +172,15 @@
                                 title="Auto-solve hashes using wordlist+rule combinations">
                                 <span id="auto-solve-label">Anterograde Amnesia</span>
                             </button>
+                            <button class="btn btn-primary" id="btn-upload-remote" title="Upload to Base Station"
+                                style="display:none;">
+                                <span>☁️ Upload</span>
+                            </button>
                             <button class="btn btn-secondary" id="btn-wordlist" title="Fabricate Wordlist">
                                 <span>Fabricate</span>
                             </button>
-                            <button class="btn btn-ghost" id="btn-deduplicate" title="Merge redundant files and remove duplicate hashes">
+                            <button class="btn btn-ghost" id="btn-deduplicate"
+                                title="Merge redundant files and remove duplicate hashes">
                                 <span>Clean</span>
                             </button>
                             <div class="attack-dropdown" id="crack-all-dropdown-container">
@@ -225,6 +230,42 @@
                         <option value="">Auto-detect</option>
                     </select>
                     <small>Select your listening device</small>
+                </div>
+
+                <div class="settings-divider"></div>
+                <h4 class="settings-section-title">📡 Base Station & Remote</h4>
+
+                <div class="form-group">
+                    <label>Mode</label>
+                    <select id="setting-remote-mode">
+                        <option value="standalone">Standalone (Default)</option>
+                        <option value="base">Base Station (Server)</option>
+                        <option value="field">Field Laptop (Client)</option>
+                    </select>
+                </div>
+
+                <!-- Base Station Config -->
+                <div id="config-base" style="display:none;">
+                    <div class="info-box">
+                        <strong>Public Access:</strong>
+                        <div class="remote-url-display">
+                            <code id="base-public-ip">Fetching...</code>
+                            <button class="btn btn-ghost btn-sm" id="btn-refresh-ip">↻</button>
+                        </div>
+                        <small>Share this URL with field laptops. Ensure port 5000 is forwarded.</small>
+                    </div>
+                </div>
+
+                <!-- Field Laptop Config -->
+                <div id="config-field" style="display:none;">
+                    <div class="form-group">
+                        <label>Base Station URL</label>
+                        <input type="text" id="setting-remote-url" class="form-input"
+                            placeholder="https://1.2.3.4:5000">
+                        <button class="btn btn-secondary btn-sm" id="btn-test-connection" style="margin-top: 5px;">Test
+                            Connection</button>
+                        <span id="connection-status" class="status-text"></span>
+                    </div>
                 </div>
 
                 <div class="settings-divider"></div>

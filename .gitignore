@@ -84,3 +84,5 @@ tools/
 
 # Separate project
 yapyap/
+*.key
+*.crt

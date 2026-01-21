@@ -125,6 +125,10 @@ const State = {
     // Polling
     statusInterval: null,
     dataInterval: null,
+
+    // Remote / Base Station
+    remoteMode: localStorage.getItem('remoteMode') || 'standalone', // standalone, base, field
+    remoteUrl: localStorage.getItem('remoteUrl') || '',
 };
 
 
@@ -145,6 +149,34 @@ const API = {
             body: JSON.stringify(data),
         });
         return res.json();
+    },
+
+    async uploadRemote(url, file, password, autoCrack = true) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('auto_crack', autoCrack);
+
+        const headers = {};
+        if (password) {
+            headers['X-Base-Password'] = password;
+        }
+
+        // Allow self-signed certs (browser warning must be accepted first)
+        const res = await fetch(`${url}/api/remote/upload`, {
+            method: 'POST',
+            body: formData,
+            headers: headers
+        });
+        return res.json();
+    },
+
+    async checkRemote(url) {
+        try {
+            const res = await fetch(`${url}/api/remote/info`, { method: 'GET', signal: AbortSignal.timeout(3000) });
+            return await res.json();
+        } catch (e) {
+            throw e;
+        }
     },
 };
 
@@ -282,6 +314,18 @@ function cacheDOM() {
         settingPortalOut: $('setting-portal-out'),
         settingPortalCapture: $('setting-portal-capture'),
         settingPortalForced: $('setting-portal-forced'),
+
+        // Remote / Base Station
+        settingRemoteMode: $('setting-remote-mode'),
+        settingRemoteUrl: $('setting-remote-url'),
+        settingRemotePass: $('setting-remote-pass'),
+        configBase: $('config-base'),
+        configField: $('config-field'),
+        basePublicIp: $('base-public-ip'),
+        btnRefreshIp: $('btn-refresh-ip'),
+        btnTestConnection: $('btn-test-connection'),
+        connectionStatus: $('connection-status'),
+        btnUploadRemote: $('btn-upload-remote'),
     };
 }
 
@@ -2025,6 +2069,113 @@ const Handlers = {
         }
     },
 
+    toggleRemoteMode() {
+        const mode = DOM.settingRemoteMode.value;
+        State.remoteMode = mode;
+        localStorage.setItem('remoteMode', mode);
+
+        DOM.configBase.style.display = mode === 'base' ? 'block' : 'none';
+        DOM.configField.style.display = mode === 'field' ? 'block' : 'none';
+
+        // Update UI visibility
+        if (DOM.btnUploadRemote) {
+            DOM.btnUploadRemote.style.display = mode === 'field' ? 'inline-flex' : 'none';
+        }
+
+        if (mode === 'base') {
+            this.fetchBaseInfo();
+        }
+    },
+
+    async fetchBaseInfo() {
+        DOM.basePublicIp.textContent = 'Fetching...';
+        try {
+            const data = await API.get('remote/info');
+            DOM.basePublicIp.textContent = `${data.protocol}://${data.public_ip}:${data.port}`;
+        } catch (e) {
+            DOM.basePublicIp.textContent = 'Error fetching IP';
+        }
+    },
+
+    async testConnection() {
+        const url = DOM.settingRemoteUrl.value.replace(/\/$/, '');
+        const pass = DOM.settingRemotePass?.value || '';
+
+        DOM.connectionStatus.textContent = 'Testing...';
+        DOM.connectionStatus.className = 'status-text';
+
+        if (!url) {
+            DOM.connectionStatus.textContent = 'Enter URL first';
+            return;
+        }
+
+        try {
+            const data = await API.checkRemote(url);
+            DOM.connectionStatus.textContent = `Connected! (Base IP: ${data.public_ip})`;
+            DOM.connectionStatus.className = 'status-text ok';
+            State.remoteUrl = url;
+            localStorage.setItem('remoteUrl', url);
+
+            if (pass) {
+                State.remotePass = pass;
+                localStorage.setItem('remotePass', pass);
+            }
+        } catch (e) {
+            DOM.connectionStatus.textContent = 'Connection failed (Check SSL/URL)';
+            DOM.connectionStatus.className = 'status-text err';
+        }
+    },
+
+    async uploadSelectedToRemote() {
+        if (State.selectedCrackHashes.size === 0) {
+            alert("Select evidence to upload first.");
+            return;
+        }
+
+        const url = State.remoteUrl;
+        const pass = State.remotePass || localStorage.getItem('remotePass') || '';
+
+        if (!url) {
+            alert("Configure Base Station URL in Settings first.");
+            DOM.settingsModal.classList.add('show');
+            return;
+        }
+
+        // Warn if no password set (though maybe user disabled auth on server?)
+        // if (!pass) alert("Note: No password set for Base Station.");
+
+        let count = 0;
+        const total = State.selectedCrackHashes.size;
+
+        Log.add(`Initiating upload of ${total} files to Base Station...`);
+
+        for (const path of State.selectedCrackHashes) {
+            try {
+                // Fetch content
+                const res = await fetch(`/api/hash/content?path=${encodeURIComponent(path)}`);
+                if (!res.ok) throw new Error("Local fetch failed");
+                const blob = await res.blob();
+
+                // Upload to Remote
+                const filename = path.split('/').pop();
+                const file = new File([blob], filename, { type: "text/plain" });
+
+                await API.uploadRemote(url, file, pass);
+                count++;
+                Log.add(`Uploaded ${filename} successfully.`, 'success');
+
+            } catch (e) {
+                Log.add(`Failed to upload ${path}: ${e.message}`, 'error');
+            }
+        }
+
+        if (count > 0) {
+            alert(`Uploaded ${count}/${total} evidence files to Base Station.`);
+            State.selectedCrackHashes.clear();
+            Render.hashes(); // Clear selection
+        }
+    },
+
 };
 
 
@@ -2221,6 +2372,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Portal banner stop button
     DOM.btnPortalStop?.addEventListener('click', () => Handlers.stopPortal());
+
+    // Remote / Base Station Controls
+    DOM.btnUploadRemote?.addEventListener('click', () => Handlers.uploadSelectedToRemote());
+    DOM.settingRemoteMode?.addEventListener('change', () => Handlers.toggleRemoteMode());
+    DOM.btnRefreshIp?.addEventListener('click', () => Handlers.fetchBaseInfo());
+    DOM.btnTestConnection?.addEventListener('click', () => Handlers.testConnection());
+
+    // Initialize Remote Mode UI
+    Handlers.toggleRemoteMode();
 
     // ─────────────────────────────────────────────────────────
     // Start

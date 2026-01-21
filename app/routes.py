@@ -613,6 +613,27 @@ def update_hash_context():
         return error_response(str(e), 500)
 
 
+@api.route('/hash/content')
+def get_hash_content():
+    """Get raw content of a hash file (for remote upload)."""
+    hash_path = request.args.get('path')
+    if not hash_path:
+        return error_response('Path required', 400)
+    
+    try:
+        # Securely resolve path
+        resolved = HashService.resolve_path(hash_path, 'hashes')
+        if not os.path.exists(resolved):
+            return error_response('File not found', 404)
+            
+        with open(resolved, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+            
+        return Response(content, mimetype='text/plain')
+    except Exception as e:
+        return error_response(str(e), 500)
+
+
 # ─────────────────────────────────────────────────────────────
 # SSE Stream
 # ─────────────────────────────────────────────────────────────

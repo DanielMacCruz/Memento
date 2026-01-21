@@ -41,6 +41,8 @@ def create_app() -> Flask:
     app.register_blueprint(api)
     
     # Main route
+    
+    # Main route
     @app.route('/')
     def index():
         return render_template('index.html')
@@ -146,6 +148,7 @@ def main():
     log_wrk.setLevel(logging.ERROR)
     
     try:
+        _original_print("[*] Server running on http://0.0.0.0:5000")
         app.run(host='0.0.0.0', port=5000, debug=False, threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         handle_exit()

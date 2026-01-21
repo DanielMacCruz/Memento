@@ -421,3 +421,65 @@ class NetworkService:
         if not network:
             return False
         return network.get('status', {}).get('cracked', False)
+
+
+class RemoteService:
+    """Handles operations for the Base Station (Remote) mode."""
+    
+    @staticmethod
+    def handle_upload(file_storage, filename: str) -> Tuple[bool, str]:
+        """
+        Save uploaded hash file and trigger processing.
+        Returns: (success, message_or_job_id)
+        """
+        if not filename.endswith('.hc22000'):
+            return False, "Invalid file type. Only .hc22000 files allowed."
+        
+        # Security: Sanitize filename
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', filename)
+        save_path = os.path.join(HashService.HASHES_DIR, safe_name)
+        
+        try:
+            os.makedirs(HashService.HASHES_DIR, exist_ok=True)
+            file_storage.save(save_path)
+            
+            # Trigger sync to register the new file
+            HashService.sync_inventory()
+            
+            return True, safe_name
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
+    def get_job_status(filename: str) -> Dict[str, Any]:
+        """Get cracking status for a file."""
+        storage = get_storage()
+        
+        # Check if hash exists
+        file_path = os.path.join("hashes", filename)
+        hash_record = storage.get_hash(file_path)
+        
+        if not hash_record:
+            return {'status': 'not_found'}
+            
+        if hash_record.get('cracked'):
+            return {
+                'status': 'cracked',
+                'password': hash_record.get('cracked_password'),
+                'timestamp': hash_record.get('cracked_at')
+            }
+        
+        # Check if it's currently being cracked
+        state = get_state()
+        if state.cracking and state.current_crack:
+            current = state.current_crack
+            if current.get('hash_name') == filename:
+                return {'status': 'cracking', 'progress': 'Active'}
+        
+        # Check if it's in the queue
+        if state.crack_queue:
+            for item in state.crack_queue:
+                if item.get('hash_name') == filename:
+                    return {'status': 'queued'}
+                    
+        return {'status': 'pending'}

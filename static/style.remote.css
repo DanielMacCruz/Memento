@@ -1,0 +1,46 @@
+/* ═══════════════════════════════════════════════════════════════
+   Remote / Base Station Styles
+   ═══════════════════════════════════════════════════════════════ */
+
+.remote-url-display {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+    background: var(--bg-base);
+    padding: var(--space-sm);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.remote-url-display code {
+    flex: 1;
+    color: var(--success);
+    font-family: monospace;
+    font-size: 1rem;
+}
+
+.form-input {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: 'Courier Prime', monospace;
+    font-size: 0.875rem;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.status-text {
+    font-size: 0.8rem;
+    margin-left: var(--space-sm);
+}
+
+.status-text.ok { color: var(--success); }
+.status-text.err { color: var(--danger); }
