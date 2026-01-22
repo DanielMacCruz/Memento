@@ -36,13 +36,11 @@ env/
 Thumbs.db
 
 # ==== APPLICATION DATA ====
-# State persistence (generated at runtime)
-data/state.json
-data/temp/
+# All application data and state persistence
+data/*
+!data/.gitkeep
 
-# Data files (too large for git)
-data/models/*.json
-data/brazilian/*.txt
+
 
 # ==== CAPTURES & HASHES ====
 # These contain personal network data - never commit
