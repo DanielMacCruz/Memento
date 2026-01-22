@@ -659,5 +659,27 @@
         "rule": ""
       }
     ]
+  },
+  "hashes/RosaIgnacia_vigilance.hc22000": {
+    "path": "hashes/RosaIgnacia_vigilance.hc22000",
+    "name": "RosaIgnacia_vigilance.hc22000",
+    "essid": "RosaIgnacia",
+    "network_bssid": "E8:20:E2:10:60:5F",
+    "hash_mode": "22000",
+    "size": 94,
+    "size_human": "94.0 B",
+    "timestamp": "2026-01-21T23:31:20.356520",
+    "cracked": false,
+    "cracked_password": null,
+    "cracked_hex": null,
+    "cracked_salt": null,
+    "cracked_output": null,
+    "cracked_at": null,
+    "cracking_attempts": [
+      {
+        "wordlist": "__MASK_8DIGIT__",
+        "rule": ""
+      }
+    ]
   }
 }

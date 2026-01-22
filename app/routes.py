@@ -47,6 +47,16 @@ def success_response(message: str = None, **data) -> Any:
 # Status & Info
 # ─────────────────────────────────────────────────────────────
 
+@api.route('/utils/ip')
+def get_ip_info():
+    """Utility route for UI to fetch public/local IP."""
+    from .tunnel import get_public_ip, get_local_ip
+    return jsonify({
+        'public_ip': get_public_ip(),
+        'local_ip': get_local_ip(),
+        'success': True
+    })
+
 @api.route('/status')
 def get_status():
     """Get current application status."""

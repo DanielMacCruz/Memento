@@ -1384,9 +1384,11 @@
     "stations": [],
     "device_ids": [],
     "cached": true,
-    "hash_ids": [],
+    "hash_ids": [
+      "hashes/RosaIgnacia_vigilance.hc22000"
+    ],
     "status": {
-      "has_hash": false,
+      "has_hash": true,
       "cracked": false
     },
     "cracked_password": null,

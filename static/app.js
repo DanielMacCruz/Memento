@@ -129,6 +129,7 @@ const State = {
     // Remote / Base Station
     remoteMode: localStorage.getItem('remoteMode') || 'standalone', // standalone, base, field
     remoteUrl: localStorage.getItem('remoteUrl') || '',
+    remotePass: localStorage.getItem('remotePass') || '',
 };
 
 
@@ -2090,8 +2091,9 @@ const Handlers = {
     async fetchBaseInfo() {
         DOM.basePublicIp.textContent = 'Fetching...';
         try {
-            const data = await API.get('remote/info');
-            DOM.basePublicIp.textContent = `${data.protocol}://${data.public_ip}:${data.port}`;
+            const data = await API.get('utils/ip');
+            // Base Station runs on port 8443 (separate from main app)
+            DOM.basePublicIp.textContent = `https://${data.public_ip}:8443`;
         } catch (e) {
             DOM.basePublicIp.textContent = 'Error fetching IP';
         }
